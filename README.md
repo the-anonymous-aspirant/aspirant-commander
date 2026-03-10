@@ -138,9 +138,9 @@ Processing is idempotent: the `commander_processed` table tracks which voice mes
 
 | Document | Description |
 |----------|-------------|
-| [COMMANDER_SPEC.md](docs/COMMANDER_SPEC.md) | Full specification (grammar, endpoints, pipeline) |
-| [COMMANDER_ARCHITECTURE.md](docs/COMMANDER_ARCHITECTURE.md) | Architecture, schema, integration points |
-| [COMMANDER_PARSER_GUIDE.md](docs/COMMANDER_PARSER_GUIDE.md) | Step-by-step parser walkthrough |
-| [COMMANDER_OPERATIONS.md](docs/COMMANDER_OPERATIONS.md) | Setup, running, testing, debugging |
+| [SPEC.md](docs/SPEC.md) | Full specification (grammar, endpoints, pipeline) |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Architecture, schema, integration points |
+| [PARSER_GUIDE.md](docs/PARSER_GUIDE.md) | Step-by-step parser walkthrough |
+| [OPERATIONS.md](docs/OPERATIONS.md) | Setup, running, testing, debugging |
 | [DECISIONS.md](docs/DECISIONS.md) | Design decisions and rationale |
 | [CHANGELOG.md](docs/CHANGELOG.md) | Release history |
