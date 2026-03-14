@@ -38,6 +38,7 @@ jobs:
           -e DB_USER=test_user \
           -e DB_PASSWORD=test_password \
           -e DB_NAME=test_db \
+          -e TEST_DATABASE_URL=postgresql://test_user:test_password@localhost:5432/test_db \
           -v "$(pwd)/tests:/app/tests" \
           commander-test pytest tests/ -v
 
