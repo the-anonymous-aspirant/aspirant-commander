@@ -30,7 +30,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Build test image
-      run: docker build -t commander-test .
+      run: docker build -t commander-test -f Dockerfile-Commander .
     - name: Run tests
       run: |
         docker run --rm --network host \
@@ -69,7 +69,7 @@ jobs:
       uses: docker/build-push-action@v5
       with:
         context: .
-        file: ./Dockerfile
+        file: ./Dockerfile-Commander
         push: true
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
