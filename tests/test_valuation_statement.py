@@ -277,3 +277,47 @@ def test_extract_endpoint_returns_structured_comparable_sales(client):
     # Structured columns are present on every row (some may be None).
     for col in ("forening", "area_m2", "pris_kr", "pris_per_m2", "salj_datum", "raw"):
         assert col in first
+
+
+# ---------- operator defaults ----------
+
+
+def test_operator_defaults_first_load_returns_example_values(client, tmp_path, monkeypatch):
+    """No file yet → GET returns the ground-truth identity so the review
+    step is pre-filled on first deploy instead of blank."""
+    monkeypatch.setenv(
+        "VALUATION_OPERATOR_DEFAULTS_PATH", str(tmp_path / "valuation_defaults.json")
+    )
+    r = client.get("/valuation-statement/operator-defaults")
+    assert r.status_code == 200
+    defaults = r.json()
+    assert defaults["maklare_namn"] == "Jenny Wiklund"
+    assert defaults["maklare_titel"] == "Registrerad fastighetsmäklare"
+    assert defaults["foretag"] == "Fastighetsbyrån"
+    assert defaults["ort"] == "Nynäshamn"
+    assert defaults["likviditet"] == "normal"
+
+
+def test_operator_defaults_saved_values_override_examples(client, tmp_path, monkeypatch):
+    """After PUT, GET reflects the saved values — including a blank ort,
+    which is a legitimate operator choice for the 'date-only' footer."""
+    path = tmp_path / "valuation_defaults.json"
+    monkeypatch.setenv("VALUATION_OPERATOR_DEFAULTS_PATH", str(path))
+
+    saved = {
+        "ort": "",
+        "maklare_namn": "Anna Andersson",
+        "maklare_titel": "Mäklare",
+        "foretag": "Annas Mäkleri",
+        "likviditet": "god",
+    }
+    put = client.put("/valuation-statement/operator-defaults", json=saved)
+    assert put.status_code == 200
+    assert path.exists()
+
+    r = client.get("/valuation-statement/operator-defaults")
+    assert r.status_code == 200
+    defaults = r.json()
+    assert defaults["maklare_namn"] == "Anna Andersson"
+    assert defaults["ort"] == ""
+    assert defaults["likviditet"] == "god"

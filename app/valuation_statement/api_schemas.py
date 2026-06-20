@@ -44,6 +44,7 @@ class ExtractResponse(BaseModel):
 
 class OperatorDefaults(BaseModel):
     """Persisted appraiser-identity fields surfaced to the review step."""
+    ort: str | None = None
     maklare_namn: str | None = None
     maklare_titel: str | None = None
     foretag: str | None = None
