@@ -207,3 +207,70 @@ def test_extract_endpoint_parses_both_types(client):
     assert fields_by_key["datavardering"]["marknadsvarde_suggested"] == "2 350 000"
     assert fields_by_key["lgh_utdrag"]["lgh_skatteverket"] == "1303"
     assert fields_by_key["lgh_utdrag"]["postort"] == "Hägersten"
+
+
+# ---------- PDF export ----------
+
+
+_GENERATE_BODY = {
+    "objekt": "LGH 1303 HSB Brf Långpannan i Stockholm (7696097448)",
+    "objekt_short": "LGH 1303 HSB Brf Långpannan i Stockholm",
+    "adress": "Hanna Rydhs gata 12",
+    "kommun": "Hägersten",
+    "upplatelseform": "Bostadsrätt",
+    "mode": "bostadsratt",
+    "datavardering_date": "2026-06-02",
+    "lagenhetsforteckning_date": "2026-06-09",
+    "likviditet": "normal",
+    "marknadsvarde_kr": "3 050 000",
+    "intervall_kr": "50 000",
+    "ort": "",
+    "datum": "18/6/2026",
+    "maklare_namn": "Jenny Wiklund",
+    "maklare_titel": "Registrerad fastighetsmäklare",
+    "foretag": "Fastighetsbyrån",
+}
+
+
+def test_generate_pdf_calls_libreoffice(client, monkeypatch):
+    from app.valuation_statement import routes as v_routes
+
+    captured: dict = {}
+
+    def fake_docx_to_pdf(docx_bytes: bytes) -> bytes:
+        captured["docx_len"] = len(docx_bytes)
+        return b"%PDF-1.7\n<<fake pdf body>>\n%%EOF"
+
+    monkeypatch.setattr(v_routes, "docx_to_pdf", fake_docx_to_pdf)
+
+    r = client.post("/valuation-statement/generate?format=pdf", json=_GENERATE_BODY)
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/pdf"
+    assert r.content.startswith(b"%PDF")
+    assert r.headers["content-disposition"].endswith('.pdf"')
+    assert captured["docx_len"] > 0
+
+
+def test_generate_pdf_503_when_libreoffice_missing(client, monkeypatch):
+    from app.valuation_statement import routes as v_routes
+    from app.valuation_statement.pdf_export import LibreOfficeUnavailable
+
+    def raise_unavailable(_docx_bytes):
+        raise LibreOfficeUnavailable("soffice not on PATH")
+
+    monkeypatch.setattr(v_routes, "docx_to_pdf", raise_unavailable)
+    r = client.post("/valuation-statement/generate?format=pdf", json=_GENERATE_BODY)
+    assert r.status_code == 503
+    assert "soffice" in r.json()["detail"].lower()
+
+
+def test_generate_default_format_is_docx(client):
+    """No ?format=… → default 'docx' (existing tests rely on this)."""
+    r = client.post("/valuation-statement/generate", json=_GENERATE_BODY)
+    assert r.status_code == 200
+    assert "officedocument.wordprocessingml.document" in r.headers["content-type"]
+
+
+def test_generate_rejects_unknown_format(client):
+    r = client.post("/valuation-statement/generate?format=ps", json=_GENERATE_BODY)
+    assert r.status_code == 422
