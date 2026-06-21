@@ -3,7 +3,7 @@ import os
 from dataclasses import asdict
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 
 from app.valuation_statement.api_schemas import (
@@ -16,6 +16,11 @@ from app.valuation_statement.api_schemas import (
 )
 from app.valuation_statement.classifier import DocumentType, classify_pdf
 from app.valuation_statement.extraction import extract_document
+from app.valuation_statement.pdf_export import (
+    LibreOfficeConversionFailed,
+    LibreOfficeUnavailable,
+    docx_to_pdf,
+)
 from app.valuation_statement.template import TemplateFields, populate
 
 
@@ -72,12 +77,16 @@ async def extract_uploads(files: list[UploadFile] = File(...)):
 
 
 @router.post("/generate")
-def generate_filled_docx(body: GenerateRequest):
+def generate_filled_docx(
+    body: GenerateRequest,
+    format: str = Query("docx", pattern="^(docx|pdf)$"),
+):
     """Render the Värdeutlåtande template with the reviewed values.
 
-    Returns the populated docx as a download attachment. The optional
-    LibreOffice docx→pdf step lives in a deploy-side wrapper (see
-    aspirant-deploy follow-up PR); this endpoint always returns docx.
+    `?format=docx` (default) returns the populated Word document.
+    `?format=pdf` runs the docx through LibreOffice headless and returns
+    the resulting PDF; if LibreOffice isn't installed the endpoint
+    surfaces a 503 so the caller can fall back to the docx flow.
     """
     fields = TemplateFields(
         objekt=body.objekt,
@@ -102,6 +111,21 @@ def generate_filled_docx(body: GenerateRequest):
     docx_bytes = populate(fields)
 
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H%M%S")
+
+    if format == "pdf":
+        try:
+            pdf_bytes = docx_to_pdf(docx_bytes)
+        except LibreOfficeUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+        except LibreOfficeConversionFailed as exc:
+            raise HTTPException(status_code=500, detail=str(exc))
+        filename = f"vardeutlatande_{stamp}.pdf"
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
     filename = f"vardeutlatande_{stamp}.docx"
     return Response(
         content=docx_bytes,
