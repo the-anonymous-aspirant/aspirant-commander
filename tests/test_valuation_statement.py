@@ -119,6 +119,22 @@ class TestPopulateBR:
         assert "18/6/2026" in paragraphs
         assert not any(p.startswith(",") for p in paragraphs)
 
+    def test_iso_datum_rendered_as_swedish_short_form(self):
+        # The Vue client submits the footer date as ISO YYYY-MM-DD from
+        # <input type="date">. The populator should render it as DD/M/YYYY.
+        fields = _br_fields()
+        fields.datum = "2026-06-18"
+        paragraphs = [p.strip() for p in _paragraph_texts(populate(fields))]
+        assert "18/6/2026" in paragraphs
+        assert "2026-06-18" not in "\n".join(paragraphs)
+
+    def test_iso_datum_with_ort_rendered_short_form(self):
+        fields = _br_fields()
+        fields.ort = "Stockholm"
+        fields.datum = "2026-06-18"
+        text = "\n".join(_paragraph_texts(populate(fields)))
+        assert "Stockholm, 18/6/2026" in text
+
 
 class TestPopulateHok:
     def test_object_row_uses_kommun_fastighet(self):
