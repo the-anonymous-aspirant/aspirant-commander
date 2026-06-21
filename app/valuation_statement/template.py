@@ -252,10 +252,17 @@ def _apply_bilder_note(text: str, note: str | None) -> str:
 # ---------- paragraph rewrite ----------
 
 def _rewrite_paragraph(para, new_text: str) -> None:
-    """Replace the paragraph text while preserving the lead run's formatting."""
+    """Replace the paragraph text while preserving the lead run's formatting.
+
+    Defensively strip any highlight color from the lead run: source templates
+    routinely mark placeholders with a yellow highlight as an authoring aid,
+    and that formatting would otherwise survive the substitution and render
+    in the populated output.
+    """
     if not para.runs:
         return
     first = para.runs[0]
     for run in para.runs[1:]:
         run.text = ""
     first.text = new_text
+    first.font.highlight_color = None
