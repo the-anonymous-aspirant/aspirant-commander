@@ -207,3 +207,73 @@ def test_extract_endpoint_parses_both_types(client):
     assert fields_by_key["datavardering"]["marknadsvarde_suggested"] == "2 350 000"
     assert fields_by_key["lgh_utdrag"]["lgh_skatteverket"] == "1303"
     assert fields_by_key["lgh_utdrag"]["postort"] == "Hägersten"
+
+
+# ---------- comparable-sales row parser (unit, no PDF) ----------
+
+
+class TestComparableRowParser:
+    """The UC Bostad PDF has no column borders, so we parse the flat-text
+    rows by anchoring on the trailing YYYY-MM and walking right-to-left.
+    These tests pin both shapes that show up in the live sample."""
+
+    def _parse(self, line):
+        from app.valuation_statement.parsers.datavardering import _parse_comparable_row
+        return _parse_comparable_row(line)
+
+    def test_eight_column_row_with_balkong(self):
+        row = self._parse("HSBBrfLångpannaniStockholm 72 Ja 6307 302610 2920000 40556 2026-04")
+        assert row == {
+            "forening": "HSB Brf Långpannan i Stockholm",
+            "area_m2": "72",
+            "balkong": "Ja",
+            "avgift_kr_manad": "6307",
+            "arsavgift_kr": "302610",
+            "pris_kr": "2920000",
+            "pris_per_m2": "40556",
+            "salj_datum": "2026-04",
+            "raw": "HSBBrfLångpannaniStockholm 72 Ja 6307 302610 2920000 40556 2026-04",
+        }
+
+    def test_seven_column_row_no_balkong(self):
+        row = self._parse("HSBBrfLångpannaniStockholm 62,5 5002 262682 2400000 38400 2025-12")
+        assert row["balkong"] is None
+        assert row["area_m2"] == "62,5"
+        assert row["avgift_kr_manad"] == "5002"
+        assert row["pris_kr"] == "2400000"
+        assert row["salj_datum"] == "2025-12"
+
+    def test_row_with_balkong_nej(self):
+        row = self._parse("HSBBrfLångpannaniStockholm 70 Nej 5500 250000 2500000 35714 2026-02")
+        assert row["balkong"] == "Nej"
+        assert row["area_m2"] == "70"
+
+    def test_line_without_date_is_skipped(self):
+        assert self._parse("Adress Boyta Avgift Pris Datum") is None
+
+    def test_too_few_columns_falls_back_to_raw(self):
+        # Malformed row — at least the raw line + the trailing date survive
+        # so the operator still sees something rather than the row vanishing.
+        row = self._parse("Onlyforening 2026-04")
+        assert row is not None
+        assert row["salj_datum"] == "2026-04"
+        assert row["raw"] == "Onlyforening 2026-04"
+        assert row.get("forening") is None
+
+
+@pytest.mark.skipif(not HAS_FIXTURES, reason="Operator-supplied PDF samples not present")
+def test_extract_endpoint_returns_structured_comparable_sales(client):
+    """The /extract response carries the per-row column dict, not just `raw`."""
+    with (FIXTURE_ROOT / "Datavardering.pdf").open("rb") as a:
+        r = client.post(
+            "/valuation-statement/extract",
+            files=[("files", ("Datavärdering.pdf", a.read(), "application/pdf"))],
+        )
+    assert r.status_code == 200
+    docs = r.json()["documents"]
+    dv = next(d for d in docs if d["document_type"] == "datavardering")
+    assert dv["comparable_sales"], "Expected at least one parsed comparable row"
+    first = dv["comparable_sales"][0]
+    # Structured columns are present on every row (some may be None).
+    for col in ("forening", "area_m2", "pris_kr", "pris_per_m2", "salj_datum", "raw"):
+        assert col in first

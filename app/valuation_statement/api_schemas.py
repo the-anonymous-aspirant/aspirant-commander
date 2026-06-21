@@ -13,7 +13,20 @@ class ExtractedFieldOut(BaseModel):
 
 
 class ComparableSale(BaseModel):
-    """One row of UC Bostad's "Sålda bostadsrätter i området" table."""
+    """One row of UC Bostad's "Sålda bostadsrätter i området" table.
+
+    Structured columns are best-effort — `raw` always carries the
+    original line so the operator has a fallback when a row fails to
+    parse cleanly.
+    """
+    forening: str | None = None
+    area_m2: str | None = None
+    balkong: str | None = None
+    avgift_kr_manad: str | None = None
+    arsavgift_kr: str | None = None
+    pris_kr: str | None = None
+    pris_per_m2: str | None = None
+    salj_datum: str | None = None
     raw: str | None = None
 
 

@@ -333,20 +333,78 @@ def _compact_orgnr(raw: str | None) -> str | None:
 
 # ---------- comparable-sales table (page 2) ----------
 
+_COMPARABLE_DATE_RE = re.compile(r"\s+(\d{4}-\d{2})$")
+_BALKONG_TOKENS = {"ja", "nej"}
+
+
 def _extract_comparable_sales(page) -> list[dict]:
     """Return a best-effort row list for the comparable-sales table.
 
-    Each row: {forening, address, boyta, rum, hiss, balkong, manadsavg, afs, pris, kvm, kopedatum}.
-    We're after the rows; visual fidelity is not critical for v1.
+    UC Bostad's PDF doesn't draw column borders, so pdfplumber's
+    `extract_table()` can't infer them — we work from the flat line
+    text and split each row by whitespace, anchored on the trailing
+    `YYYY-MM` sale-month token. Columns from left:
+      forening (CamelCase-concatenated) — area_m² — optional balkong (Ja/Nej)
+      — månadsavgift — årsavgift — pris — pris/m² — datum.
+
+    Each emitted dict includes the structured columns plus the original
+    `raw` line, so the frontend can fall back if a row is missing
+    columns (different brf templates etc.).
     """
     rows: list[dict] = []
     text = page.extract_text() or ""
     for line in text.splitlines():
-        # Row pattern: '...Långpannan...' followed by a date YYYY-MM.
-        m = re.search(r"(\d[\d ]*\d{3,4})\s+(\d+)\s+(\d{4}-\d{2})$", line.strip())
-        if m:
-            rows.append({"raw": line.strip()})
+        parsed = _parse_comparable_row(line)
+        if parsed is not None:
+            rows.append(parsed)
     return rows
+
+
+def _parse_comparable_row(line: str) -> dict | None:
+    stripped = line.strip()
+    date_match = _COMPARABLE_DATE_RE.search(stripped)
+    if not date_match:
+        return None
+    salj_datum = date_match.group(1)
+    head = stripped[: date_match.start()].strip()
+    parts = head.split()
+    # 7 cols without balkong (forening, area, månads, års, pris, kr/m²)
+    # or 8 cols with balkong inserted at position 3.
+    if len(parts) < 6:
+        return {"raw": stripped, "salj_datum": salj_datum}
+
+    pris_per_m2 = parts[-1]
+    pris_kr = parts[-2]
+    arsavgift_kr = parts[-3]
+    avgift_kr_manad = parts[-4]
+    rest = parts[:-4]
+
+    balkong: str | None = None
+    if rest and rest[-1].lower() in _BALKONG_TOKENS:
+        balkong = rest[-1]
+        rest = rest[:-1]
+    if not rest:
+        return {"raw": stripped, "salj_datum": salj_datum}
+
+    area_m2 = rest[-1]
+    forening_tokens = rest[:-1]
+    forening: str | None = None
+    if forening_tokens:
+        # The PDF concatenates Brf name as one CamelCase token (HSBBrfLångpannaniStockholm);
+        # `_expand_concat` is the same heuristic used for the föreningsinformation field.
+        forening = _expand_concat(" ".join(forening_tokens))
+
+    return {
+        "forening": forening,
+        "area_m2": area_m2,
+        "balkong": balkong,
+        "avgift_kr_manad": avgift_kr_manad,
+        "arsavgift_kr": arsavgift_kr,
+        "pris_kr": pris_kr,
+        "pris_per_m2": pris_per_m2,
+        "salj_datum": salj_datum,
+        "raw": stripped,
+    }
 
 
 # ---------- footer date ----------
