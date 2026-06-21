@@ -135,6 +135,20 @@ class TestPopulateBR:
         text = "\n".join(_paragraph_texts(populate(fields)))
         assert "Stockholm, 18/6/2026" in text
 
+    def test_populated_output_has_no_highlights(self):
+        # The mall.docx ships with placeholders yellow-highlighted as an
+        # authoring aid. The footer date is the visible failure mode (its
+        # first run carries the highlight, which would otherwise survive
+        # substitution), but every populated field must render unhighlighted.
+        doc = Document(BytesIO(populate(_br_fields())))
+        offenders = [
+            (pi, ri, run.text, run.font.highlight_color)
+            for pi, para in enumerate(doc.paragraphs)
+            for ri, run in enumerate(para.runs)
+            if run.font.highlight_color is not None and run.text
+        ]
+        assert offenders == [], f"populated runs still carry highlights: {offenders}"
+
 
 class TestPopulateHok:
     def test_object_row_uses_kommun_fastighet(self):
