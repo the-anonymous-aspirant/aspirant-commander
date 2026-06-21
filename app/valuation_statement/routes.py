@@ -117,25 +117,50 @@ def generate_filled_docx(body: GenerateRequest):
 _DEFAULTS_ENV = "VALUATION_OPERATOR_DEFAULTS_PATH"
 
 
+# First-time-load values taken from the operator's ground-truth examples
+# (Värdeutlåtande{BR,Hok}.pdf). Surfaced when no persisted defaults file
+# exists yet so the operator doesn't have to retype the same identity on
+# every fresh deploy. Overwritten the moment they tick 'Spara'.
+_EXAMPLE_DEFAULTS = OperatorDefaults(
+    ort="Nynäshamn",
+    maklare_namn="Jenny Wiklund",
+    maklare_titel="Registrerad fastighetsmäklare",
+    foretag="Fastighetsbyrån",
+    likviditet="normal",
+)
+
+
 def _load_operator_defaults() -> OperatorDefaults:
     """Read persisted appraiser-identity defaults from a JSON file.
 
     The path is settable via VALUATION_OPERATOR_DEFAULTS_PATH (defaults to
-    /data/commander/valuation_defaults.json). Returns empty defaults if the
-    file is absent — the review step then shows blank inputs.
+    /data/commander/valuation_defaults.json). When no file exists yet,
+    falls back to the ground-truth example identity so first-time-load
+    isn't a blank form; once the operator saves, the file is authoritative.
     """
     import json
     from pathlib import Path
 
     path = Path(os.environ.get(_DEFAULTS_ENV, "/data/commander/valuation_defaults.json"))
     if not path.exists():
-        return OperatorDefaults()
+        return _EXAMPLE_DEFAULTS.model_copy()
     try:
         data = json.loads(path.read_text())
         return OperatorDefaults(**data)
     except Exception as exc:
         logger.warning("Failed to load operator defaults at %s: %s", path, exc)
-        return OperatorDefaults()
+        return _EXAMPLE_DEFAULTS.model_copy()
+
+
+@router.get("/operator-defaults", response_model=OperatorDefaults)
+def get_operator_defaults():
+    """Read the persisted appraiser-identity defaults.
+
+    Mirrors the `operator_defaults` block embedded in `/extract`'s response
+    so the frontend (or a manual-entry caller) can hydrate the form without
+    first uploading a PDF.
+    """
+    return _load_operator_defaults()
 
 
 @router.put("/operator-defaults", response_model=OperatorDefaults)
