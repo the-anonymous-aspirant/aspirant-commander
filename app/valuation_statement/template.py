@@ -121,12 +121,13 @@ def _build_replacements(f: TemplateFields) -> list[tuple[str, str]]:
     # this with a multi-step substitution: the connector ',' between Ort and
     # Datum is part of the [Ort], pattern so we replace ",[Datum]" or "[Ort],[Datum]"
     # as a single unit.
+    datum_display = _swedish_display_date(f.datum)
     if f.ort:
-        repls.append(("[Ort],[Datum]", f"{f.ort}, {f.datum}"))
+        repls.append(("[Ort],[Datum]", f"{f.ort}, {datum_display}"))
     else:
-        repls.append(("[Ort],[Datum]", f.datum))
+        repls.append(("[Ort],[Datum]", datum_display))
     repls.append(("[Ort]", f.ort))
-    repls.append(("[Datum]", f.datum))
+    repls.append(("[Datum]", datum_display))
     repls.append(("[Mäklarens namn]", f.maklare_namn))
     repls.append(("[Titel/Funktion]", f.maklare_titel))
     repls.append(("[Företagets namn]", f.foretag))
@@ -138,6 +139,26 @@ def _apply_replacements(text: str, replacements: list[tuple[str, str]]) -> str:
     for needle, sub in replacements:
         text = text.replace(needle, sub)
     return text
+
+
+_ISO_DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
+
+
+def _swedish_display_date(value: str) -> str:
+    """Render an ISO YYYY-MM-DD date as Swedish DD/M/YYYY for the footer.
+
+    The web client switched the [Datum] input to <input type='date'>, which
+    submits ISO-format strings. The Värdeutlåtande footer convention is the
+    short Swedish form (e.g. "18/6/2026"). Any non-ISO input — empty strings,
+    operator-typed text, legacy clients — passes through unchanged.
+    """
+    if not value:
+        return value
+    m = _ISO_DATE_RE.match(value.strip())
+    if not m:
+        return value
+    year, month, day = m.groups()
+    return f"{int(day)}/{int(month)}/{year}"
 
 
 def _finalize_belopp(text: str, marknadsvarde: str, intervall: str) -> str:
