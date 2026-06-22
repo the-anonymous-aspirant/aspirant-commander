@@ -207,6 +207,29 @@ def test_generate_endpoint_returns_docx(client):
     assert "Objekt: LGH 1303 HSB Brf Långpannan i Stockholm (7696097448)" in text
 
 
+# ---------- fastighetsutdrag dispatch (no PDF fixture required) ----------
+
+
+def test_extract_document_dispatches_fastighetsutdrag_without_importerror():
+    """Guard the dispatch table against missing parser modules.
+
+    The classifier recognises FASTIGHETSUTDRAG, so the route hands one
+    to `extract_document()`. If the per-type parser module is missing
+    the call raises ImportError and the whole `/extract` request 500s.
+    The stub parser returns an empty result — the operator still types
+    `fastighetsutdrag_date` during review — but the dispatch must not
+    raise.
+    """
+    from app.valuation_statement.classifier import DocumentType
+    from app.valuation_statement.extraction import extract_document
+
+    result = extract_document(b"", DocumentType.FASTIGHETSUTDRAG, "utdrag.pdf")
+
+    assert result.document_type == DocumentType.FASTIGHETSUTDRAG
+    assert result.filename == "utdrag.pdf"
+    assert result.fields == []
+
+
 # ---------- /extract integration (skip when fixtures missing) ----------
 
 
