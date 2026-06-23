@@ -220,6 +220,25 @@ def _uc_document_date(ctx: ParseContext) -> str | None:
     return m.group(1) if m else None
 
 
+# UC tabular's banner reads `Värdeutlåtande` / `Bostadsrätt` on
+# consecutive lines (line 0 / line 1 of page-1 text). Every BR
+# Datavärdering from UC Bostad carries this — the doc isn't a UC BR
+# without it — so banner→`Bostadsrätt` is categorical, not a sample-
+# specific match.
+_UC_BANNER_BR = re.compile(
+    r"V[äa]rdeutl[åa]tande\s*\n\s*Bostadsr[äa]tt",
+    re.IGNORECASE,
+)
+
+
+def _uc_upplatelseform(ctx: ParseContext) -> str | None:
+    if not _is_uc_tabular(ctx):
+        return None
+    if _UC_BANNER_BR.search(ctx.page1_text):
+        return "Bostadsrätt"
+    return None
+
+
 # UC-tabular address split: 'HannaRydhsgata12LGH1303' → ('Hanna Rydhs gata 12', '1303')
 _STREET_SUFFIXES = (
     "gata", "vagen", "vägen", "gränden", "stigen", "allén",
@@ -470,9 +489,10 @@ _SLOTS: tuple[SlotExtractor, ...] = (
     SlotExtractor(
         slot_key="upplatelseform",
         strategies=(
+            Strategy("uc_tabular_banner_bostadsratt", _uc_upplatelseform),
             Strategy("fb_prose_upplatelseform_bullet", _prose_upplatelseform),
         ),
-        note="Prose only — UC tabular implies Bostadsrätt from the doc type itself.",
+        note="UC banner ('Värdeutlåtande / Bostadsrätt') always implies Bostadsrätt; prose bullet otherwise.",
     ),
     SlotExtractor(
         slot_key="marknadsvarde_suggested",
