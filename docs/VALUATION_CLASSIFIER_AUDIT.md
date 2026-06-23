@@ -139,34 +139,38 @@ positions.
 ## CATEGORIES table
 
 The classifier walks this table top-to-bottom and returns the first
-category whose fingerprints **all** match. Order matters: the Northmill
-variants are checked before the UC variants because the UC fingerprints
-would also match a Northmill PDF on the literal word `Värdeutlåtande`.
+category whose fingerprints **all** match. Per the operator correction
+on epic #1060, fingerprinting is **content-only**: a category MUST NOT
+key off issuer branding ("Northmill Bank", "UC Bostad"). Same content
+type from a different bank lands in the same `DocumentType` so one
+parser branch handles every issuer.
 
 | # | `DocumentType` | Required fingerprints (all must match) | Extraction module (today) |
 |---|---|---|---|
-| 1 | `VARDEUTLATANDE_NORTHMILL_BR` | `VÄRDEUTLÅTANDE`, `Northmill Bank`, `Upplåtelseform:\s*Bostadsrätt` | stub (Phase C) |
-| 2 | `VARDEUTLATANDE_NORTHMILL_SMAHUS` | `VÄRDEUTLÅTANDE`, `Northmill Bank`, `Upplåtelseform:\s*Friköpt` | stub (Phase C) |
-| 3 | `DATAVARDERING_BR` | `Värdeutlåtande` then `Bostadsrätt` on the banner (line-aware) | `parsers.datavardering` |
-| 4 | `DATAVARDERING_SMAHUS` | `Värdeutlåtande` then `Småhus` on the banner (line-aware) | stub (Phase C) |
-| 5 | `FASTIGHETSUTDRAG_PLUS_R` | `Fastighetsrapport` then `Plus R` on the banner | `parsers.fastighetsutdrag` (existing stub) |
+| 1 | `DATAVARDERING_SMAHUS` (prose) | `VÄRDEUTLÅTANDE`, `Värderingsobjekt`, `Upplåtelseform:\s*Friköpt` | `parsers.datavardering_smahus` (prose branch) |
+| 2 | `VARDEUTLATANDE_NORTHMILL_BR` (prose) | `VÄRDEUTLÅTANDE`, `Värderingsobjekt`, `Upplåtelseform:\s*Bostadsrätt` | stub (follow-up) |
+| 3 | `DATAVARDERING_BR` (UC tabular) | `Värdeutlåtande Bostadsrätt` on the banner | `parsers.datavardering` |
+| 4 | `DATAVARDERING_SMAHUS` (UC tabular) | `Värdeutlåtande Småhus` on the banner | `parsers.datavardering_smahus` (tabular branch) |
+| 5 | `FASTIGHETSUTDRAG_PLUS_R` | `Fastighetsrapport Plus R` on the banner | `parsers.fastighetsutdrag` (existing stub) |
 | 6 | `LGH_UTDRAG` | `Lägenhetsuppgi.{1,3}ter`, `Bostadsrä.{1,3}tsförening` | `parsers.lgh_utdrag` |
 | – | `UNKNOWN` | — | (empty result) |
 
-The previous `DATAVARDERING` value is renamed to `DATAVARDERING_BR` to
-make the Bostadsrätt vs Småhus split explicit.
+`DATAVARDERING_SMAHUS` is the same enum value emitted from both the
+prose-appraisal category (#1) and the UC tabular category (#4); the
+parser branch dispatches between layouts on page-1 content.
 
-## Phase C — per-category parser branches spun out as separate tasks
+The `VARDEUTLATANDE_NORTHMILL_BR` enum survives because its prose
+appraisal layout has no parser yet — the BR side is a follow-up
+parallel to `DATAVARDERING_SMAHUS`'s prose path. The previous
+`VARDEUTLATANDE_NORTHMILL_SMAHUS` enum was retired by epic #1060's
+operator correction in favour of the unified `DATAVARDERING_SMAHUS`.
+
+## Phase C — remaining parser branches
 
 The classifier returning the correct type is necessary but not
-sufficient: three of the categories above route to a stub parser today.
-Phase C subtasks are filed under #1060:
+sufficient. Open work under #1060:
 
-- Parser branch for `datavardering_smahus` (Friköpt: Fastighetsbeteckning,
-  Marknadsvärde, Osäkerhet uppåt/nedåt, tomtarea, byggnadstyp).
-- Parser branch for `vardeutlatande_northmill_br` (Northmill template:
-  Objekt, Adress, Kommun, Upplåtelseform, marknadsvärde + intervall,
-  datavärdering/lägenhetsförteckning datum).
-- Parser branch for `vardeutlatande_northmill_smahus` (same Northmill
-  layout, friköpt variant: Objekt = Fastighetsbeteckning, Adress, Kommun,
-  marknadsvärde + intervall, datavärdering/fastighetsutdrag datum).
+- Parser branch unification for `VARDEUTLATANDE_NORTHMILL_BR` (the
+  Fastighetsbyrån prose appraisal of a Bostadsrätt) — same prose
+  layout as the now-merged Småhus prose path, distinguished only by
+  the `Upplåtelseform: Bostadsrätt` line.
