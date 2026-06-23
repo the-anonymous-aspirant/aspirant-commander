@@ -31,7 +31,7 @@ def parse(pdf_bytes: bytes, filename: str) -> ExtractionResult:
     cells = _build_cell_grid(p1_words)
 
     result = ExtractionResult(
-        document_type=DocumentType.DATAVARDERING,
+        document_type=DocumentType.DATAVARDERING_BR,
         filename=filename,
     )
 
