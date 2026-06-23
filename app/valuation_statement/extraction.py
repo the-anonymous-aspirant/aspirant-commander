@@ -45,6 +45,10 @@ def extract_document(
         from app.valuation_statement.parsers import datavardering
 
         return datavardering.parse(pdf_bytes, filename)
+    if document_type == DocumentType.DATAVARDERING_SMAHUS:
+        from app.valuation_statement.parsers import datavardering_smahus
+
+        return datavardering_smahus.parse(pdf_bytes, filename)
     if document_type == DocumentType.LGH_UTDRAG:
         from app.valuation_statement.parsers import lgh_utdrag
 
