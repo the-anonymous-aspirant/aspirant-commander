@@ -28,11 +28,11 @@ FIXTURE_DIR = Path(__file__).parent / "fixtures" / "classifier"
     [
         ("datavardering_br.txt", DocumentType.DATAVARDERING_BR),
         ("datavardering_smahus.txt", DocumentType.DATAVARDERING_SMAHUS),
-        ("vardeutlatande_northmill_br.txt", DocumentType.VARDEUTLATANDE_NORTHMILL_BR),
-        # The "Northmill Småhus" Fastighetsbyrån prose appraisal lands in
-        # the same DocumentType as UC Bostad's tabular Småhus report;
-        # one parser branch handles both layouts per the operator
-        # correction on epic #1060 ("filename ≠ content type").
+        # Both Fastighetsbyrån prose appraisals classify into the same
+        # DocumentType as their UC Bostad tabular counterpart; the per-
+        # slot strategy chain inside the parser handles both layouts
+        # (one parser branch per content type regardless of issuer).
+        ("vardeutlatande_northmill_br.txt", DocumentType.DATAVARDERING_BR),
         ("vardeutlatande_northmill_smahus.txt", DocumentType.DATAVARDERING_SMAHUS),
         ("fastighetsutdrag.txt", DocumentType.FASTIGHETSUTDRAG),
         ("lgh_utdrag.txt", DocumentType.LGH_UTDRAG),
@@ -70,12 +70,14 @@ def test_classifier_is_content_only_not_issuer_branded():
     # must still classify the PDF the same way — the Upplåtelseform
     # line and "Värderingsobjekt"/"VÄRDEUTLÅTANDE" headers are what
     # carry the content signal.
-    northmill = (FIXTURE_DIR / "vardeutlatande_northmill_smahus.txt").read_text(
-        encoding="utf-8"
-    )
-    debranded = northmill.replace("Northmill Bank AB", "Generic Bank XYZ")
-    document_type, _ = classify_text(debranded)
-    assert document_type == DocumentType.DATAVARDERING_SMAHUS
+    for fixture, expected in (
+        ("vardeutlatande_northmill_smahus.txt", DocumentType.DATAVARDERING_SMAHUS),
+        ("vardeutlatande_northmill_br.txt", DocumentType.DATAVARDERING_BR),
+    ):
+        northmill = (FIXTURE_DIR / fixture).read_text(encoding="utf-8")
+        debranded = northmill.replace("Northmill Bank AB", "Generic Bank XYZ")
+        document_type, _ = classify_text(debranded)
+        assert document_type == expected, fixture
 
 
 def test_lgh_fingerprints_tolerate_pdftotext_ligature_glitches():
