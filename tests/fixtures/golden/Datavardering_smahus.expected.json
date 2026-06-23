@@ -1,0 +1,20 @@
+{
+  "_description": "UC Bostad Värdeutlåtande Småhus — tabular data-feed report. Six-column page-1 grid; no page-2 comparables.",
+  "document_type": "datavardering_smahus",
+  "fields": {
+    "fastighetsbeteckning": "Bengtsfors Närsidan 1:21",
+    "adress": null,
+    "kommun": null,
+    "byggnadstyp": "Friliggande",
+    "taxeringsvarde": "765 000 (Tax24)",
+    "tomtyta_m2": "2 089",
+    "byggnadsar": "1980",
+    "vardear": "1980",
+    "upplatelseform": null,
+    "marknadsvarde_suggested": "1 075 000",
+    "osakerhet_uppat": "350 000",
+    "osakerhet_nedat": "280 000",
+    "document_date": "2026-06-18"
+  },
+  "comparable_sales_count": 0
+}
