@@ -135,6 +135,65 @@ class TestPopulateBR:
         text = "\n".join(_paragraph_texts(populate(fields)))
         assert "Stockholm, 18/6/2026" in text
 
+    def test_marknadsvarde_renders_as_swedish_grouped_when_unspaced(self):
+        # Operator types '500000' — the populated output renders '500 000'.
+        # Same path is also the regression fix for the '5 000 000 vs 500 000
+        # look alike when unspaced' complaint that motivated this work.
+        fields = _br_fields()
+        fields.marknadsvarde_kr = "5000000"
+        fields.intervall_kr = "50000"
+        text = "\n".join(_paragraph_texts(populate(fields)))
+        assert "Marknadsvärdet bedöms till 5 000 000 kr" in text
+        assert "intervall om ± 50 000 kr" in text
+
+    def test_marknadsvarde_already_grouped_passes_through(self):
+        # Idempotent: '3 050 000' stays '3 050 000', not '3050 000' or
+        # similar from a naive re-format.
+        text = "\n".join(_paragraph_texts(populate(_br_fields())))
+        assert "Marknadsvärdet bedöms till 3 050 000 kr" in text
+        assert "intervall om ± 50 000 kr" in text
+
+    def test_marknadsvarde_paragraph_is_separated_from_liquidity(self):
+        # Item 2 of #1026: 'Marknadsvärdet bedöms till …' must be its own
+        # paragraph, not run-on after the liquidity sentence.
+        paragraphs = _paragraph_texts(populate(_br_fields()))
+        liq_idx = next(
+            i for i, p in enumerate(paragraphs)
+            if "likviditeten bedöms som normal" in p
+        )
+        mv_idx = next(
+            i for i, p in enumerate(paragraphs)
+            if p.startswith("Marknadsvärdet bedöms till")
+        )
+        assert mv_idx == liq_idx + 1, (
+            f"Expected Marknadsvärdet paragraph immediately after liquidity "
+            f"paragraph, got liq_idx={liq_idx} mv_idx={mv_idx}"
+        )
+
+    def test_beskrivning_paragraph_is_unbulleted(self):
+        # Item 1 of #1026: the Beskrivning paragraph lands below the four
+        # Värderingsobjekt bullets and itself has no bullet marker (numPr).
+        from docx.oxml.ns import qn
+        doc = Document(BytesIO(populate(_br_fields())))
+        beskrivning = next(
+            p for p in doc.paragraphs if p.text.startswith("Beskrivning:")
+        )
+        pPr = beskrivning._p.pPr
+        has_numpr = pPr is not None and pPr.find(qn("w:numPr")) is not None
+        assert not has_numpr, "Beskrivning paragraph still carries a bullet"
+
+    def test_punctuation_fixes_appear_in_output(self):
+        text = "\n".join(_paragraph_texts(populate(_br_fields())))
+        # 'objekt Hänsyn' → 'objekt. Hänsyn'
+        assert "jämförbara objekt. Hänsyn" in text
+        assert "jämförbara objekt Hänsyn" not in text
+        # 'K/T värde' → 'K/T-värde'
+        assert "K/T-värde" in text
+        assert "K/T värde" not in text
+        # 'Underlag för kreditprövning' — no trailing space.
+        assert "Underlag för kreditprövning\n" in text + "\n"
+        assert "Underlag för kreditprövning " not in text
+
     def test_populated_output_has_no_highlights(self):
         # The mall.docx ships with placeholders yellow-highlighted as an
         # authoring aid. The footer date is the visible failure mode (its
