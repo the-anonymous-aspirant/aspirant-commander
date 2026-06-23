@@ -145,32 +145,51 @@ key off issuer branding ("Northmill Bank", "UC Bostad"). Same content
 type from a different bank lands in the same `DocumentType` so one
 parser branch handles every issuer.
 
-| # | `DocumentType` | Required fingerprints (all must match) | Extraction module (today) |
+| # | `DocumentType` | Required fingerprints (all must match) | Extraction module |
 |---|---|---|---|
-| 1 | `DATAVARDERING_SMAHUS` (prose) | `VÄRDEUTLÅTANDE`, `Värderingsobjekt`, `Upplåtelseform:\s*Friköpt` | `parsers.datavardering_smahus` (prose branch) |
-| 2 | `VARDEUTLATANDE_NORTHMILL_BR` (prose) | `VÄRDEUTLÅTANDE`, `Värderingsobjekt`, `Upplåtelseform:\s*Bostadsrätt` | stub (follow-up) |
-| 3 | `DATAVARDERING_BR` (UC tabular) | `Värdeutlåtande Bostadsrätt` on the banner | `parsers.datavardering` |
-| 4 | `DATAVARDERING_SMAHUS` (UC tabular) | `Värdeutlåtande Småhus` on the banner | `parsers.datavardering_smahus` (tabular branch) |
-| 5 | `FASTIGHETSUTDRAG_PLUS_R` | `Fastighetsrapport Plus R` on the banner | `parsers.fastighetsutdrag` (existing stub) |
+| 1 | `DATAVARDERING_SMAHUS` (prose) | `VÄRDEUTLÅTANDE`, `Värderingsobjekt`, `Upplåtelseform:\s*Friköpt` | `parsers.smahus` (prose strategies) |
+| 2 | `DATAVARDERING_BR` (prose) | `VÄRDEUTLÅTANDE`, `Värderingsobjekt`, `Upplåtelseform:\s*Bostadsrätt` | `parsers.bostadsratt` (prose strategies) |
+| 3 | `DATAVARDERING_BR` (UC tabular) | `Värdeutlåtande Bostadsrätt` on the banner | `parsers.bostadsratt` (UC-tabular strategies) |
+| 4 | `DATAVARDERING_SMAHUS` (UC tabular) | `Värdeutlåtande Småhus` on the banner | `parsers.smahus` (UC-tabular strategies) |
+| 5 | `FASTIGHETSUTDRAG` | `Fastighetsrapport Plus R` on the banner | `parsers.fastighetsutdrag` (stub) |
 | 6 | `LGH_UTDRAG` | `Lägenhetsuppgi.{1,3}ter`, `Bostadsrä.{1,3}tsförening` | `parsers.lgh_utdrag` |
 | – | `UNKNOWN` | — | (empty result) |
 
-`DATAVARDERING_SMAHUS` is the same enum value emitted from both the
-prose-appraisal category (#1) and the UC tabular category (#4); the
-parser branch dispatches between layouts on page-1 content.
+Each property-type DocumentType (`DATAVARDERING_BR` /
+`DATAVARDERING_SMAHUS`) is emitted from two categories — the UC
+tabular variant and the Fastighetsbyrån prose variant. The parser
+dispatches between layouts inside a per-slot strategy chain (see
+`parsers/_strategy.py`): each docx-template slot lists its tactics
+in priority order, and the first non-None match wins. A new issuer's
+layout means appending one strategy per affected slot — never a new
+parser branch and never a new DocumentType.
 
-The `VARDEUTLATANDE_NORTHMILL_BR` enum survives because its prose
-appraisal layout has no parser yet — the BR side is a follow-up
-parallel to `DATAVARDERING_SMAHUS`'s prose path. The previous
-`VARDEUTLATANDE_NORTHMILL_SMAHUS` enum was retired by epic #1060's
-operator correction in favour of the unified `DATAVARDERING_SMAHUS`.
+## Extractor strategy library (post-#1079)
 
-## Phase C — remaining parser branches
+The per-slot extractor shape is the durable surface that hardens
+the classifier against new sample shapes:
 
-The classifier returning the correct type is necessary but not
-sufficient. Open work under #1060:
+- `parsers/_strategy.py` — `Strategy` (named extract callable +
+  confidence), `SlotExtractor` (priority-ordered strategy tuple,
+  returns `not_found` if every strategy misses — **never** a broken
+  default), `run_slots()` (walks the inventory).
+- `parsers/_context.py` — `ParseContext` (page-1 text + words + full
+  multi-page text), `build_context()` (single pdfplumber open per
+  parse, immutable view for the slot walk).
+- `parsers/bostadsratt.py` + `parsers/smahus.py` — declare the slot
+  inventory (operator-pinned, mirrors `TemplateFields`) and the
+  strategy chain per slot. UC-tabular strategies sit before prose
+  strategies in each chain.
 
-- Parser branch unification for `VARDEUTLATANDE_NORTHMILL_BR` (the
-  Fastighetsbyrån prose appraisal of a Bostadsrätt) — same prose
-  layout as the now-merged Småhus prose path, distinguished only by
-  the `Upplåtelseform: Bostadsrätt` line.
+### Golden-test harness
+
+`tests/test_golden_pipeline.py` runs every `tests/fixtures/golden/<sample>.expected.json`
+through `classify_pdf` + `extract_document` against the operator's
+real PDF in the sample directory (`VALUATION_SAMPLE_DIR`, default
+`/tmp/vardeutlatande`). It asserts the classified `document_type`,
+every slot's value, and the comparable-sales row count match the
+golden exactly. Adding a new sample = drop PDF + author its
+`.expected.json` capturing every slot value — the test fails until
+the strategy chain handles the new layout. A coverage guard
+(`test_every_parser_backed_document_type_has_a_golden`) flags any
+parser-backed DocumentType added without a golden.

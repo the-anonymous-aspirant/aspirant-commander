@@ -1,0 +1,20 @@
+{
+  "_description": "Fastighetsbyrån prose appraisal — Småhus (Friköpt). Same prose-bullet branch as VardeutlatandeBR, different upplatelseform.",
+  "document_type": "datavardering_smahus",
+  "fields": {
+    "fastighetsbeteckning": "Vaggeryd Hok 2:139",
+    "adress": "Lillholmsvägen 12",
+    "kommun": "Hok",
+    "byggnadstyp": null,
+    "taxeringsvarde": null,
+    "tomtyta_m2": null,
+    "byggnadsar": null,
+    "vardear": null,
+    "upplatelseform": "Friköpt",
+    "marknadsvarde_suggested": "2 200 000",
+    "osakerhet_uppat": "50 000",
+    "osakerhet_nedat": "50 000",
+    "document_date": "2026-06-18"
+  },
+  "comparable_sales_count": 0
+}

@@ -332,7 +332,7 @@ class TestComparableRowParser:
     These tests pin both shapes that show up in the live sample."""
 
     def _parse(self, line):
-        from app.valuation_statement.parsers.datavardering import _parse_comparable_row
+        from app.valuation_statement.parsers.bostadsratt import _parse_comparable_row
         return _parse_comparable_row(line)
 
     def test_eight_column_row_with_balkong(self):
@@ -463,9 +463,18 @@ class TestProseSmahusRegex:
     silently regress against pdfplumber output variations."""
 
     def _parse(self, text):
-        from app.valuation_statement.parsers.datavardering_smahus import _parse_prose
+        # Build a minimal ParseContext from page-1 text only — the prose
+        # strategies don't need word coordinates.
+        from app.valuation_statement.parsers._context import ParseContext
+        from app.valuation_statement.parsers._strategy import run_slots
+        from app.valuation_statement.parsers.smahus import _SLOTS
 
-        return {f.key: f.value for f in _parse_prose(text, "x.pdf").fields}
+        ctx = ParseContext(
+            page1_text=text,
+            page1_words=(),
+            page_texts=(text,),
+        )
+        return {f.key: f.value for f in run_slots(_SLOTS, ctx, "x.pdf")}
 
     def test_bullets_with_visible_bullet_glyph(self):
         text = (

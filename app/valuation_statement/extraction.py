@@ -36,19 +36,23 @@ def extract_document(
 ) -> ExtractionResult:
     """Dispatch to the per-type parser.
 
-    Categories without a dedicated parser (Phase C tasks under #1060
-    spin those out) return an empty `ExtractionResult` with the
-    classified `document_type`, so the operator types every field
-    during the review step. `UNKNOWN` does the same.
+    The Bostadsrätt and Småhus parsers each unify two issuer layouts
+    (UC Bostad tabular + Fastighetsbyrån prose) behind a single
+    per-slot strategy chain — adding a new issuer's layout means
+    appending one strategy per affected slot, not branching to a new
+    parser. Categories without a dedicated parser (e.g.
+    FASTIGHETSUTDRAG today, UNKNOWN always) return an empty
+    `ExtractionResult` so the operator types every field during the
+    review step.
     """
     if document_type == DocumentType.DATAVARDERING_BR:
-        from app.valuation_statement.parsers import datavardering
+        from app.valuation_statement.parsers import bostadsratt
 
-        return datavardering.parse(pdf_bytes, filename)
+        return bostadsratt.parse(pdf_bytes, filename)
     if document_type == DocumentType.DATAVARDERING_SMAHUS:
-        from app.valuation_statement.parsers import datavardering_smahus
+        from app.valuation_statement.parsers import smahus
 
-        return datavardering_smahus.parse(pdf_bytes, filename)
+        return smahus.parse(pdf_bytes, filename)
     if document_type == DocumentType.LGH_UTDRAG:
         from app.valuation_statement.parsers import lgh_utdrag
 
