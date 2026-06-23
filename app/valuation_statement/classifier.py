@@ -109,12 +109,12 @@ def classify_pdf(pdf_bytes: bytes) -> DocumentType:
     other out-of-band hint. The deterministic kernel is `classify_text`;
     this wrapper exists so callers can hand it raw bytes.
     """
-    page1_text = _read_first_page_text(pdf_bytes)
+    page1_text = read_first_page_text(pdf_bytes)
     document_type, _matched = classify_text(page1_text)
     return document_type
 
 
-def _read_first_page_text(pdf_bytes: bytes) -> str:
+def read_first_page_text(pdf_bytes: bytes) -> str:
     # PyMuPDF copes with the wider variety of CMaps we see in HSB and
     # Lantmäteriet printouts than pdfplumber does. We only need a few
     # keywords, so the per-document parser overhead is acceptable here.
