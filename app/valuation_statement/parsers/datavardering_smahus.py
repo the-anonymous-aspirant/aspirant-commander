@@ -1,14 +1,25 @@
-"""Parser for UC Bostad's "Värdeutlåtande Småhus" Datavärdering PDF.
+"""Parser for "Värdeutlåtande Småhus" valuation PDFs.
 
-Same UC Bostad family as `datavardering_br`, but the Småhus layout has
-six sub-columns in the Objektsinformation band (the property-detail
-table) and two columns in the Värde block, instead of BR's flat
-three-column layout. We therefore work directly from word (x, y)
-positions on page 1: each word is bucketed into a (column_anchor,
-row_y) cell, and per-slot extraction walks "row immediately below the
-label at the same column anchor".
+Two known layouts both classify to `DATAVARDERING_SMAHUS` and feed
+through this branch (per the operator correction on epic #1060,
+"filename ≠ content type" — same parser branch handles every issuer):
 
-Sample reference: `UCB_BENGTSFORS_NARSIDAN_1-21_*.pdf`.
+1. **UC Bostad data-feed report** (sample
+   `UCB_BENGTSFORS_NARSIDAN_1-21_*.pdf`). Six sub-columns in the
+   Objektsinformation band and two columns in the Värde block. We work
+   from page-1 word (x, y) positions: each word is bucketed into a
+   (column_anchor, row_y) cell, and per-slot extraction walks "row
+   immediately below the label at the same column anchor".
+
+2. **Fastighetsbyrån prose appraisal output** (sample
+   `VärdeutlåtandeHok.pdf`). A short prose document with
+   `Värderingsobjekt` bullets ("Objekt:", "Adress:", "Kommun:",
+   "Upplåtelseform:") and a "Marknadsvärdet bedöms till X kr, med ett
+   intervall om +/- Y kr" sentence. Extraction is regex-based against
+   the flat text (no column grid).
+
+Layout dispatch happens inside `parse()`: presence of the
+"Värderingsobjekt" header is the prose-layout marker.
 """
 
 from __future__ import annotations
@@ -35,9 +46,18 @@ _ROW_TOL = 3   # pt — y-bucket size, mirrors BR
 
 def parse(pdf_bytes: bytes, filename: str) -> ExtractionResult:
     with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
-        p1_words = pdf.pages[0].extract_words()
-        footer_text = pdf.pages[0].extract_text() or ""
+        page = pdf.pages[0]
+        p1_words = page.extract_words()
+        page_text = page.extract_text() or ""
 
+    if "Värderingsobjekt" in page_text:
+        return _parse_prose(page_text, filename)
+    return _parse_tabular(p1_words, page_text, filename)
+
+
+def _parse_tabular(
+    p1_words: list[dict], footer_text: str, filename: str
+) -> ExtractionResult:
     rows = _build_rows(p1_words)
 
     result = ExtractionResult(
@@ -347,3 +367,151 @@ def _extract_document_date(footer_text: str, filename: str) -> ExtractedField:
         source_page=1,
         note="Date the datavärdering was issued (used in the template's Beskrivning sentence).",
     )
+
+
+# ---------- prose layout (Fastighetsbyrån Värdeutlåtande appraisal) ----------
+
+
+# Bullet body lines look like "● Adress: Lillholmsvägen 12". The bullet
+# may or may not be on the value line depending on how pdfplumber
+# collapses spans, so the regex tolerates both.
+def _bullet_value(text: str, label: str) -> str | None:
+    pat = re.compile(
+        rf"(?:^|\n)\s*(?:●\s*)?{re.escape(label)}\s*:\s*(?P<value>[^\n]+)"
+    )
+    m = pat.search(text)
+    if not m:
+        return None
+    return m.group("value").strip() or None
+
+
+# "Marknadsvärdet bedöms till 2 200 000 kr, med ett intervall om +/- 50 000 kr"
+# Tolerates "+/-", "±", and the (rare) bare "intervall om 50 000 kr".
+_PROSE_VALUE_RE = re.compile(
+    r"Marknadsv[äa]rdet\s+bed[öo]ms\s+till\s+(?P<amount>[\d\s]+?)\s*kr"
+    r"(?:[^.]*?intervall\s+om\s*(?:\+/-|±)?\s*(?P<interval>[\d\s]+?)\s*kr)?",
+    re.IGNORECASE,
+)
+
+# "18/6/2026" Swedish dd/m/yyyy date the appraiser stamps at the end.
+_PROSE_DATE_RE = re.compile(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b")
+
+
+def _parse_prose(page_text: str, filename: str) -> ExtractionResult:
+    result = ExtractionResult(
+        document_type=DocumentType.DATAVARDERING_SMAHUS,
+        filename=filename,
+    )
+
+    objekt = _bullet_value(page_text, "Objekt")
+    result.fields.append(
+        ExtractedField(
+            key="fastighetsbeteckning",
+            value=objekt,
+            confidence="confident" if objekt else "not_found",
+            source_filename=filename,
+            source_page=1,
+            note="From the prose 'Objekt:' bullet — carries the property identifier (matches the docx template's `objekt` slot).",
+        )
+    )
+
+    adress = _bullet_value(page_text, "Adress")
+    result.fields.append(
+        ExtractedField(
+            key="adress",
+            value=adress,
+            confidence="confident" if adress else "not_found",
+            source_filename=filename,
+            source_page=1,
+        )
+    )
+
+    kommun = _bullet_value(page_text, "Kommun")
+    result.fields.append(
+        ExtractedField(
+            key="kommun",
+            value=kommun,
+            confidence="confident" if kommun else "not_found",
+            source_filename=filename,
+            source_page=1,
+        )
+    )
+
+    # Upplåtelseform doubles as the docx template's `mode` selector
+    # (bostadsratt vs. frikopt). Surface it explicitly so the review
+    # step can default the mode without the operator retyping.
+    upplatelseform = _bullet_value(page_text, "Upplåtelseform")
+    result.fields.append(
+        ExtractedField(
+            key="upplatelseform",
+            value=upplatelseform,
+            confidence="confident" if upplatelseform else "not_found",
+            source_filename=filename,
+            source_page=1,
+            note="Drives the template's bostadsrätt/friköpt mode toggle.",
+        )
+    )
+
+    value_match = _PROSE_VALUE_RE.search(page_text)
+    if value_match:
+        marknadsvarde = _format_sek(value_match.group("amount"))
+        interval = (
+            _format_sek(value_match.group("interval"))
+            if value_match.group("interval")
+            else None
+        )
+    else:
+        marknadsvarde, interval = None, None
+
+    result.fields.append(
+        ExtractedField(
+            key="marknadsvarde_suggested",
+            value=marknadsvarde,
+            confidence="confident" if marknadsvarde else "not_found",
+            source_filename=filename,
+            source_page=1,
+            note="From the 'Marknadsvärdet bedöms till X kr' prose sentence.",
+        )
+    )
+    # Prose appraisals report a single symmetric interval — emit it as
+    # both uppåt and nedåt so the docx template's BR/Småhus columns can
+    # consume the same key set as the UC tabular branch.
+    result.fields.append(
+        ExtractedField(
+            key="osakerhet_uppat",
+            value=interval,
+            confidence="confident" if interval else "not_found",
+            source_filename=filename,
+            source_page=1,
+            note="Prose template gives a single ±X kr interval; uppåt = nedåt = X.",
+        )
+    )
+    result.fields.append(
+        ExtractedField(
+            key="osakerhet_nedat",
+            value=interval,
+            confidence="confident" if interval else "not_found",
+            source_filename=filename,
+            source_page=1,
+            note="Prose template gives a single ±X kr interval; uppåt = nedåt = X.",
+        )
+    )
+
+    date_match = _PROSE_DATE_RE.search(page_text)
+    if date_match:
+        day, month, year = date_match.groups()
+        iso = f"{year}-{int(month):02d}-{int(day):02d}"
+    else:
+        iso = None
+    result.fields.append(
+        ExtractedField(
+            key="document_date",
+            value=iso,
+            confidence="confident" if iso else "not_found",
+            source_filename=filename,
+            source_page=1,
+            note="From the dd/m/yyyy stamp the appraiser writes above 'Utfärdat av'.",
+        )
+    )
+
+    return result
