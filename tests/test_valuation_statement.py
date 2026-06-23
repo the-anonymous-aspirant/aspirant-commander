@@ -307,16 +307,16 @@ def test_extract_endpoint_parses_both_types(client):
     assert r.status_code == 200
     data = r.json()
     types = {d["document_type"] for d in data["documents"]}
-    assert types == {"datavardering", "lgh_utdrag"}
+    assert types == {"datavardering_br", "lgh_utdrag"}
 
     fields_by_key = {
         d["document_type"]: {f["key"]: f["value"] for f in d["fields"]}
         for d in data["documents"]
     }
-    assert fields_by_key["datavardering"]["forening_namn"] == (
+    assert fields_by_key["datavardering_br"]["forening_namn"] == (
         "HSB Brf Långpannan i Stockholm"
     )
-    assert fields_by_key["datavardering"]["marknadsvarde_suggested"] == "2 350 000"
+    assert fields_by_key["datavardering_br"]["marknadsvarde_suggested"] == "2 350 000"
     assert fields_by_key["lgh_utdrag"]["lgh_skatteverket"] == "1303"
     assert fields_by_key["lgh_utdrag"]["postort"] == "Hägersten"
 
@@ -383,7 +383,7 @@ def test_extract_endpoint_returns_structured_comparable_sales(client):
         )
     assert r.status_code == 200
     docs = r.json()["documents"]
-    dv = next(d for d in docs if d["document_type"] == "datavardering")
+    dv = next(d for d in docs if d["document_type"] == "datavardering_br")
     assert dv["comparable_sales"], "Expected at least one parsed comparable row"
     first = dv["comparable_sales"][0]
     # Structured columns are present on every row (some may be None).
