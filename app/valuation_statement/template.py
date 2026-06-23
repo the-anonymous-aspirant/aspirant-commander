@@ -162,11 +162,36 @@ def _swedish_display_date(value: str) -> str:
 
 
 def _finalize_belopp(text: str, marknadsvarde: str, intervall: str) -> str:
-    """Replace the [belopp] sentinels with the marknadsvärde then intervall."""
+    """Replace the [belopp] sentinels with the marknadsvärde then intervall.
+
+    Both amounts pass through `_format_swedish_number` so the populated docx
+    always renders Swedish space-as-thousands-separator regardless of how
+    the operator typed the input ('500000' vs '500 000' vs '5000000').
+    """
     sentinel = "␞BELOPP␞"
-    text = text.replace(sentinel, marknadsvarde, 1)
-    text = text.replace(sentinel, intervall, 1)
+    text = text.replace(sentinel, _format_swedish_number(marknadsvarde), 1)
+    text = text.replace(sentinel, _format_swedish_number(intervall), 1)
     return text
+
+
+_DIGITS_OR_SPACE_RE = re.compile(r"^[\d\s ]+$")
+
+
+def _format_swedish_number(value: str) -> str:
+    """Group an integer string into Swedish space-as-thousands-separator form.
+
+    Accepts already-spaced input ('500 000'), unspaced input ('500000'), or
+    non-numeric strings (passed through unchanged so non-currency placeholders
+    like '—' or operator-typed prose survive). Idempotent.
+    """
+    if not value:
+        return value
+    if not _DIGITS_OR_SPACE_RE.match(value):
+        return value
+    digits = re.sub(r"[\s ]", "", value)
+    if not digits.isdigit():
+        return value
+    return re.sub(r"\B(?=(\d{3})+(?!\d))", " ", digits)
 
 
 # ---------- source-clause assembly ----------
