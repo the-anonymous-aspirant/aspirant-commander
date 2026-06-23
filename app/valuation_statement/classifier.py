@@ -17,7 +17,6 @@ from enum import Enum
 class DocumentType(str, Enum):
     DATAVARDERING_BR = "datavardering_br"
     DATAVARDERING_SMAHUS = "datavardering_smahus"
-    VARDEUTLATANDE_NORTHMILL_BR = "vardeutlatande_northmill_br"
     FASTIGHETSUTDRAG = "fastighetsutdrag"
     LGH_UTDRAG = "lgh_utdrag"
     UNKNOWN = "unknown"
@@ -32,18 +31,18 @@ class Category:
 
 # Fingerprinting is content-only — we MUST NOT distinguish by issuer
 # branding (e.g. "Northmill Bank", "UC Bostad"). The same property-type
-# document from a different bank or appraiser should land in the same
-# DocumentType so a single parser branch can handle every issuer
-# (per the operator correction on epic #1060).
+# document from a different bank or appraiser lands in the same
+# DocumentType so a single parser branch (with a per-slot strategy
+# library inside) can handle every issuer.
 #
-# Småhus has two known layouts that both map to DATAVARDERING_SMAHUS:
+# Both BR and Småhus have two known layouts each:
 #   * UC Bostad's tabular data-feed report
-#     ("Värdeutlåtande" + "Småhus" on the banner)
+#     ("Värdeutlåtande Bostadsrätt" / "Värdeutlåtande Småhus" header)
 #   * Fastighetsbyrån's prose appraisal output
-#     ("VÄRDEUTLÅTANDE" all-caps banner + "Värderingsobjekt"
-#      + "Upplåtelseform: Friköpt")
-# BR still has two separate DocumentType values because the prose-Northmill
-# branch lacks a parser (followup); both are fingerprinted by content shape.
+#     ("VÄRDEUTLÅTANDE" all-caps banner + "Värderingsobjekt" +
+#      "Upplåtelseform: Bostadsrätt" / "Upplåtelseform: Friköpt")
+# All four map to two DocumentTypes total (DATAVARDERING_BR /
+# DATAVARDERING_SMAHUS); the parser dispatches on layout internally.
 CATEGORIES: tuple[Category, ...] = (
     Category(
         document_type=DocumentType.DATAVARDERING_SMAHUS,
@@ -55,7 +54,7 @@ CATEGORIES: tuple[Category, ...] = (
         ),
     ),
     Category(
-        document_type=DocumentType.VARDEUTLATANDE_NORTHMILL_BR,
+        document_type=DocumentType.DATAVARDERING_BR,
         name="Värdeutlåtande Bostadsrätt — Fastighetsbyrån prose appraisal",
         fingerprints=(
             re.compile(r"VÄRDEUTLÅTANDE"),
