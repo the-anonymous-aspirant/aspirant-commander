@@ -18,7 +18,6 @@ class DocumentType(str, Enum):
     DATAVARDERING_BR = "datavardering_br"
     DATAVARDERING_SMAHUS = "datavardering_smahus"
     VARDEUTLATANDE_NORTHMILL_BR = "vardeutlatande_northmill_br"
-    VARDEUTLATANDE_NORTHMILL_SMAHUS = "vardeutlatande_northmill_smahus"
     FASTIGHETSUTDRAG = "fastighetsutdrag"
     LGH_UTDRAG = "lgh_utdrag"
     UNKNOWN = "unknown"
@@ -31,39 +30,49 @@ class Category:
     fingerprints: tuple[re.Pattern, ...]
 
 
-# Northmill variants share the all-caps `VÄRDEUTLÅTANDE` banner with a
-# bank-name line, so they are checked before the UC `Värdeutlåtande` /
-# `Bostadsrätt|Småhus` banner variants — otherwise the UC fingerprints
-# would also match a Northmill PDF on the literal word `Värdeutlåtande`.
+# Fingerprinting is content-only — we MUST NOT distinguish by issuer
+# branding (e.g. "Northmill Bank", "UC Bostad"). The same property-type
+# document from a different bank or appraiser should land in the same
+# DocumentType so a single parser branch can handle every issuer
+# (per the operator correction on epic #1060).
+#
+# Småhus has two known layouts that both map to DATAVARDERING_SMAHUS:
+#   * UC Bostad's tabular data-feed report
+#     ("Värdeutlåtande" + "Småhus" on the banner)
+#   * Fastighetsbyrån's prose appraisal output
+#     ("VÄRDEUTLÅTANDE" all-caps banner + "Värderingsobjekt"
+#      + "Upplåtelseform: Friköpt")
+# BR still has two separate DocumentType values because the prose-Northmill
+# branch lacks a parser (followup); both are fingerprinted by content shape.
 CATEGORIES: tuple[Category, ...] = (
     Category(
-        document_type=DocumentType.VARDEUTLATANDE_NORTHMILL_BR,
-        name="Northmill Värdeutlåtande — Bostadsrätt",
+        document_type=DocumentType.DATAVARDERING_SMAHUS,
+        name="Värdeutlåtande Småhus — Fastighetsbyrån prose appraisal",
         fingerprints=(
             re.compile(r"VÄRDEUTLÅTANDE"),
-            re.compile(r"Northmill\s+Bank"),
-            re.compile(r"Uppl[åa]telseform\s*:\s*Bostadsr[äa]tt", re.IGNORECASE),
-        ),
-    ),
-    Category(
-        document_type=DocumentType.VARDEUTLATANDE_NORTHMILL_SMAHUS,
-        name="Northmill Värdeutlåtande — Friköpt",
-        fingerprints=(
-            re.compile(r"VÄRDEUTLÅTANDE"),
-            re.compile(r"Northmill\s+Bank"),
+            re.compile(r"Värderingsobjekt"),
             re.compile(r"Uppl[åa]telseform\s*:\s*Frik[öo]pt", re.IGNORECASE),
         ),
     ),
     Category(
+        document_type=DocumentType.VARDEUTLATANDE_NORTHMILL_BR,
+        name="Värdeutlåtande Bostadsrätt — Fastighetsbyrån prose appraisal",
+        fingerprints=(
+            re.compile(r"VÄRDEUTLÅTANDE"),
+            re.compile(r"Värderingsobjekt"),
+            re.compile(r"Uppl[åa]telseform\s*:\s*Bostadsr[äa]tt", re.IGNORECASE),
+        ),
+    ),
+    Category(
         document_type=DocumentType.DATAVARDERING_BR,
-        name="UC Bostad Värdeutlåtande — Bostadsrätt",
+        name="Värdeutlåtande Bostadsrätt — UC Bostad data-feed report",
         fingerprints=(
             re.compile(r"V[äa]rdeutl[åa]tande\s+Bostadsr[äa]tt", re.IGNORECASE),
         ),
     ),
     Category(
         document_type=DocumentType.DATAVARDERING_SMAHUS,
-        name="UC Bostad Värdeutlåtande — Småhus",
+        name="Värdeutlåtande Småhus — UC Bostad data-feed report",
         fingerprints=(
             re.compile(r"V[äa]rdeutl[åa]tande\s+Sm[åa]hus", re.IGNORECASE),
         ),
