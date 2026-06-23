@@ -55,7 +55,7 @@ async def extract_uploads(files: list[UploadFile] = File(...)):
                 detail=f"{upload.filename}: file is not a PDF.",
             )
 
-        doc_type = classify_pdf(pdf_bytes, upload.filename)
+        doc_type = classify_pdf(pdf_bytes)
         parsed = extract_document(pdf_bytes, doc_type, upload.filename or "<unnamed>")
         results.append(
             ExtractionResultOut(

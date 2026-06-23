@@ -34,8 +34,14 @@ def extract_document(
     document_type: DocumentType,
     filename: str,
 ) -> ExtractionResult:
-    """Dispatch to the per-type parser; UNKNOWN returns an empty result."""
-    if document_type == DocumentType.DATAVARDERING:
+    """Dispatch to the per-type parser.
+
+    Categories without a dedicated parser (Phase C tasks under #1060
+    spin those out) return an empty `ExtractionResult` with the
+    classified `document_type`, so the operator types every field
+    during the review step. `UNKNOWN` does the same.
+    """
+    if document_type == DocumentType.DATAVARDERING_BR:
         from app.valuation_statement.parsers import datavardering
 
         return datavardering.parse(pdf_bytes, filename)
