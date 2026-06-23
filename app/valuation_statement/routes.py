@@ -22,6 +22,7 @@ from app.valuation_statement.pdf_export import (
     docx_to_pdf,
 )
 from app.valuation_statement.template import TemplateFields, populate
+from app.valuation_statement.transparency import registry_as_dict
 
 
 logger = logging.getLogger(__name__)
@@ -197,3 +198,17 @@ def save_operator_defaults(body: OperatorDefaults):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body.model_dump_json(indent=2))
     return body
+
+
+# ---------- transparency / about ----------
+
+
+@router.get("/about")
+def about_registry():
+    """Render the classifier + per-parser strategy registry for the operator.
+
+    Sourced directly from `classifier.CATEGORIES` and each parser's slot
+    registry — a parser change is visible on the operator-facing About
+    surface the moment it ships, with no hand-maintained markdown to drift.
+    """
+    return registry_as_dict()

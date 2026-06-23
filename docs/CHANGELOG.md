@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- `GET /valuation-statement/about` returns a uniform JSON description of
+  every classifier `DocumentType` — the `CATEGORIES` fingerprints walked
+  on PDF page 1 plus each parser's per-slot strategy registry. Sourced
+  live from `classifier.CATEGORIES` + `parsers.*._SLOTS` /
+  `lgh_utdrag._LABEL_STEMS` so the operator-facing About surface auto-
+  reflects every parser change with no hand-maintained markdown to drift.
+
 ## [1.0.0] - 2025-03-10
 
 ### Initial Release
