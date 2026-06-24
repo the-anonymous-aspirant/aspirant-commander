@@ -1,22 +1,23 @@
-"""End-to-end classify+extract regression harness against real PDFs.
+"""End-to-end field-first extractor regression harness against real PDFs.
 
 For each `<sample>.expected.json` in `tests/fixtures/golden/`:
 
   1. Locate the sibling PDF in the operator's sample directory
      (`/tmp/vardeutlatande` by default; override with
      `VALUATION_SAMPLE_DIR`).
-  2. Run the full classify_pdf + extract_document pipeline.
-  3. Assert the classified `document_type` and every per-slot value
-     match the golden JSON exactly. `comparable_sales_count` pins the
-     UC BR page-2 row count without dragging the entire table into
-     the golden (the row-parser unit tests cover row shape).
+  2. Run the full `extract_document()` pipeline (no classifier; one
+     field-first chain per slot).
+  3. Assert every per-slot value matches the golden JSON exactly.
+     `comparable_sales_count` pins the UC BR page-2 row count without
+     dragging the entire table into the golden (the row-parser unit
+     tests cover row shape).
 
 Adding a new sample is the operator-facing contract this harness
 encodes: drop the new PDF into the sample directory, author its
 `.expected.json` capturing every slot's expected value, and the test
-fails until the parser strategy chain handles the new layout. Forces
-the new shape into the strategy library — never lets it silently
-fall through to UNKNOWN or to a partial extraction.
+fails until the chain handles the new layout. Forces the new shape
+into the strategy library — never lets it silently land as a row of
+None values that the operator has to retype.
 
 PDFs containing personnummer / property details live outside the
 repo, so missing samples are SKIPPED per-fixture (not silenced). CI
@@ -33,7 +34,6 @@ from pathlib import Path
 
 import pytest
 
-from app.valuation_statement.classifier import DocumentType, classify_pdf
 from app.valuation_statement.extraction import extract_document
 
 
@@ -50,7 +50,7 @@ def _golden_files() -> list[Path]:
     _golden_files(),
     ids=lambda p: p.stem,
 )
-def test_classify_and_extract_matches_golden(golden_path: Path):
+def test_extract_matches_golden(golden_path: Path):
     golden = json.loads(golden_path.read_text(encoding="utf-8"))
     pdf_name = golden_path.name.replace(".expected.json", ".pdf")
     pdf_path = SAMPLE_DIR / pdf_name
@@ -58,13 +58,7 @@ def test_classify_and_extract_matches_golden(golden_path: Path):
         pytest.skip(f"Sample PDF not present: {pdf_path}")
 
     pdf_bytes = pdf_path.read_bytes()
-    actual_type = classify_pdf(pdf_bytes)
-    assert actual_type.value == golden["document_type"], (
-        f"{pdf_name}: classifier returned {actual_type.value}, "
-        f"golden expected {golden['document_type']}"
-    )
-
-    result = extract_document(pdf_bytes, actual_type, pdf_name)
+    result = extract_document(pdf_bytes, pdf_name)
     actual_fields = {f.key: f.value for f in result.fields}
 
     expected_fields = golden["fields"]
@@ -86,9 +80,9 @@ def test_classify_and_extract_matches_golden(golden_path: Path):
 
 def test_golden_set_is_nonempty():
     """Guard against the directory accidentally going empty (e.g. a
-    bad mv during refactor). Without this guard the parametrize
-    would generate zero tests and the suite would report green with
-    no coverage.
+    bad mv during refactor). Without this guard the parametrize would
+    generate zero tests and the suite would report green with no
+    coverage.
     """
     assert _golden_files(), (
         f"No `.expected.json` files found in {GOLDEN_DIR}. The golden "
@@ -96,32 +90,26 @@ def test_golden_set_is_nonempty():
     )
 
 
-# DocumentTypes without a dedicated parser yet — the dispatcher
-# returns an empty `ExtractionResult` for these so the operator
-# types every field at review time. Add to this set when a new
-# parser-less DocumentType is introduced (and remove when its
-# parser + golden land).
-_PARSERLESS_TYPES = frozenset({DocumentType.FASTIGHETSUTDRAG.value})
-
-
-def test_every_parser_backed_document_type_has_a_golden():
-    """Every parser-backed DocumentType must be represented by at
-    least one golden fixture. Without this, a new DocumentType
-    could ship with a strategy chain but no integration coverage
-    against a real PDF — and the operator's "verify patterns
-    generalize" guard would be gone for that type.
+def test_golden_covers_every_documented_sample_layout():
+    """Pin the set of sample-PDF layouts the field-first chains must
+    handle. New layout = new fixture; missing layout = silent gap.
     """
-    covered = set()
-    for path in _golden_files():
-        golden = json.loads(path.read_text(encoding="utf-8"))
-        covered.add(golden["document_type"])
-    expected = {
-        t.value for t in DocumentType
-        if t != DocumentType.UNKNOWN and t.value not in _PARSERLESS_TYPES
+    expected_layouts = {
+        "Datavardering",            # UC BR tabular (3-col, pre-2026)
+        "Datavardering_2",          # UC BR tabular (6-col, post-2026)
+        "VardeutlatandeBR",         # Fastighetsbyrån prose BR
+        "VardeutlatandeHok",        # Fastighetsbyrån prose Friköpt
+        "UCB_Bengtsfors",           # UC Småhus tabular, address missing
+        "UCB_Katrineholm",          # UC Småhus tabular, address present
+        "FastighetPlusR_Bengtsfors",   # Lantmäteriet fastighetsrapport
+        "FastighetPlusR_Katrineholm",  # Lantmäteriet fastighetsrapport
+        "LGH_utdrag",               # HSB lägenhetsförteckning (Långpannan)
+        "Min_bostad",               # HSB lägenhetsförteckning (Hilda i Malmö)
     }
-    missing = expected - covered
+    covered = {p.name.replace(".expected.json", "") for p in _golden_files()}
+    missing = expected_layouts - covered
     assert not missing, (
-        f"Parser-backed DocumentType(s) without a golden fixture: "
-        f"{sorted(missing)}. Add tests/fixtures/golden/<sample>.expected.json "
-        f"for each, capturing every slot's expected value against a real PDF."
+        f"Sample layouts without a golden fixture: {sorted(missing)}. "
+        f"Drop the PDF into the sample directory and author its "
+        f"`.expected.json` so the chain regressions are caught."
     )

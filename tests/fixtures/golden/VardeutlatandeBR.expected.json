@@ -1,19 +1,16 @@
 {
-  "_description": "Fastighetsbyrån prose appraisal — Bostadsrätt. Was previously the orphaned VARDEUTLATANDE_NORTHMILL_BR (classified but no parser). Now feeds the BR strategy chain (prose-bullet branch).",
-  "document_type": "datavardering_br",
+  "_description": "Fastighetsbyrån prose appraisal — Bostadsrätt. Värderingsobjekt bullet list.",
   "fields": {
-    "forening_namn": "HSB Brf Långpannan i Stockholm",
-    "organisationsnummer": "7696097448",
-    "lgh_internal": "1303",
-    "address_street": "Hanna Rydhs gata 12",
-    "postnummer": null,
-    "postort": "Hägersten",
-    "kommun_datavardering": "Hägersten",
+    "objekt": "LGH 1303 HSB Brf Långpannan i Stockholm (7696097448)",
+    "objekt_short": "LGH 1303 HSB Brf Långpannan i Stockholm",
+    "adress": "Hanna Rydhs gata 12",
+    "kommun": "Hägersten",
     "upplatelseform": "Bostadsrätt",
-    "marknadsvarde_suggested": "3 050 000",
-    "osakerhet_uppat": "50 000",
-    "osakerhet_nedat": "50 000",
-    "document_date": "2026-06-18"
+    "marknadsvarde_kr": "3 050 000",
+    "intervall_kr": "50 000",
+    "document_date": "2026-06-18",
+    "source_class": "datavardering",
+    "property_shape": "bostadsratt"
   },
   "comparable_sales_count": 0
 }

@@ -1,0 +1,16 @@
+{
+  "_description": "UC Bostad Småhus tabular. No recorded address (Lagfart: Saknades) — adress/kommun chain returns None.",
+  "fields": {
+    "objekt": "Bengtsfors Närsidan 1:21",
+    "objekt_short": "Bengtsfors Närsidan 1:21",
+    "adress": null,
+    "kommun": null,
+    "upplatelseform": "Friköpt",
+    "marknadsvarde_kr": "1 075 000",
+    "intervall_kr": "350 000",
+    "document_date": "2026-06-18",
+    "source_class": "datavardering",
+    "property_shape": "fastighet"
+  },
+  "comparable_sales_count": 0
+}

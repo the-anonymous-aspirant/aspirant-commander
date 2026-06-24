@@ -1,7 +1,5 @@
 from pydantic import BaseModel, Field
 
-from app.valuation_statement.classifier import DocumentType
-
 
 class ExtractedFieldOut(BaseModel):
     key: str
@@ -31,7 +29,12 @@ class ComparableSale(BaseModel):
 
 
 class ExtractionResultOut(BaseModel):
-    document_type: DocumentType
+    """Per-PDF result.
+
+    `document_type` is no longer surfaced; `source_class` and
+    `property_shape` ride in `fields` and the frontend reads them from
+    there to route each PDF into the right docx slots.
+    """
     filename: str
     fields: list[ExtractedFieldOut]
     comparable_sales: list[ComparableSale] = Field(default_factory=list)

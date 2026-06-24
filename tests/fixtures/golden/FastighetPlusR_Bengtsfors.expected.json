@@ -1,0 +1,16 @@
+{
+  "_description": "Lantmäteriet Fastighetsrapport Plus R for Bengtsfors Närsidan 1:21. Feeds fastighetsutdrag_date.",
+  "fields": {
+    "objekt": "Bengtsfors Närsidan 1:21",
+    "objekt_short": "Bengtsfors Närsidan 1:21",
+    "adress": "Närsidan 10",
+    "kommun": "Bengtsfors",
+    "upplatelseform": "Friköpt",
+    "marknadsvarde_kr": null,
+    "intervall_kr": null,
+    "document_date": null,
+    "source_class": "fastighetsutdrag",
+    "property_shape": "fastighet"
+  },
+  "comparable_sales_count": 0
+}

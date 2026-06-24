@@ -1,0 +1,16 @@
+{
+  "_description": "UC Bostad Småhus tabular (Katrineholm Julita-ängtorp 1:137).",
+  "fields": {
+    "objekt": "Katrineholm Julita-ängtorp 1:137",
+    "objekt_short": "Katrineholm Julita-ängtorp 1:137",
+    "adress": "Hedängsvägen 6",
+    "kommun": "Julita",
+    "upplatelseform": "Friköpt",
+    "marknadsvarde_kr": "1 475 000",
+    "intervall_kr": "450 000",
+    "document_date": "2026-06-23",
+    "source_class": "datavardering",
+    "property_shape": "fastighet"
+  },
+  "comparable_sales_count": 0
+}

@@ -1,0 +1,16 @@
+{
+  "_description": "HSB lägenhetsförteckning (Hilda i Malmö). Skatteverket lgh-nr unset (0); HSB-internal nr is 602.",
+  "fields": {
+    "objekt": "LGH 0 HSB Bostadsrättsförening Hilda i Malmö (7460010163)",
+    "objekt_short": "LGH 0 HSB Bostadsrättsförening Hilda i Malmö",
+    "adress": "Von Lingens Väg 112",
+    "kommun": "Malmö",
+    "upplatelseform": "Bostadsrätt",
+    "marknadsvarde_kr": null,
+    "intervall_kr": null,
+    "document_date": "2026-06-23",
+    "source_class": "lagenhetsforteckning",
+    "property_shape": "bostadsratt"
+  },
+  "comparable_sales_count": 0
+}

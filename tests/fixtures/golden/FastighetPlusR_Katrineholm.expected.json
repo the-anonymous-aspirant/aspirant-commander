@@ -1,0 +1,16 @@
+{
+  "_description": "Lantmäteriet Fastighetsrapport Plus R for Katrineholm Julita-Ängtorp 1:137.",
+  "fields": {
+    "objekt": "Katrineholm Julita-Ängtorp 1:137",
+    "objekt_short": "Katrineholm Julita-Ängtorp 1:137",
+    "adress": "Hedängsvägen 6",
+    "kommun": "Julita",
+    "upplatelseform": "Friköpt",
+    "marknadsvarde_kr": null,
+    "intervall_kr": null,
+    "document_date": null,
+    "source_class": "fastighetsutdrag",
+    "property_shape": "fastighet"
+  },
+  "comparable_sales_count": 0
+}
