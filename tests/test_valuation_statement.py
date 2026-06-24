@@ -184,6 +184,41 @@ class TestPopulateBR:
         has_numpr = pPr is not None and pPr.find(qn("w:numPr")) is not None
         assert not has_numpr, "Beskrivning paragraph still carries a bullet"
 
+    def test_beskrivning_label_is_not_bold(self):
+        # Task #1124: the 'Beskrivning:' label rendered bold and the operator
+        # asked for it to read as plain text. Guard the first run against a
+        # regression to bold formatting.
+        doc = Document(BytesIO(populate(_br_fields())))
+        beskrivning = next(
+            p for p in doc.paragraphs if p.text.startswith("Beskrivning:")
+        )
+        first_run = beskrivning.runs[0]
+        assert first_run.text.startswith("Beskrivning"), (
+            f"Expected 'Beskrivning' lead run, got {first_run.text!r}"
+        )
+        assert not first_run.bold, (
+            "Beskrivning label run still carries bold formatting"
+        )
+
+    def test_beskrivning_is_separated_from_bullets(self):
+        # Task #1124: the operator asked for Beskrivning to render as its own
+        # clearly-separated block one step below the Värderingsobjekt bullet
+        # list. Guarantee this by requiring an empty paragraph immediately
+        # before the Beskrivning paragraph (i.e. the previous paragraph is
+        # blank and not the Upplåtelseform bullet).
+        doc = Document(BytesIO(populate(_br_fields())))
+        paragraphs = list(doc.paragraphs)
+        beskrivning_idx = next(
+            i for i, p in enumerate(paragraphs)
+            if p.text.startswith("Beskrivning:")
+        )
+        assert beskrivning_idx > 0, "Beskrivning is at document start"
+        previous = paragraphs[beskrivning_idx - 1]
+        assert previous.text == "", (
+            f"Expected blank paragraph before Beskrivning, got "
+            f"{previous.text[:60]!r}"
+        )
+
     def test_punctuation_fixes_appear_in_output(self):
         text = "\n".join(_paragraph_texts(populate(_br_fields())))
         # 'objekt Hänsyn' → 'objekt. Hänsyn'
