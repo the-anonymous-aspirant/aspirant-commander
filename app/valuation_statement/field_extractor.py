@@ -176,17 +176,23 @@ def _format_tax_amount(raw: str | None) -> str | None:
     return f"{formatted} {qualifier}" if qualifier else formatted
 
 
-# ---------- UC-tabular word-grid extraction ----------
+# ---------- column-grid word extraction (UC tabular + Fastighetsrapport) ----------
 #
-# UC Bostad's PDFs (BR + Småhus + the post-2026 BR variant) all use the same
-# label-then-value-on-row-below layout: words at column X carry the label,
-# words at column X on the next y-bucket below carry the value. The number
-# of columns differs (3-col old BR, 4-col new BR Datavärdering, 6-col
-# Småhus), but the per-cell algorithm is identical: find the label word,
-# find the words in the same x-column on the next sustained row below.
+# UC Bostad's PDFs (BR + Småhus + the post-2026 BR variant) and Lantmäteriet's
+# Fastighetsrapport all use the same label-then-value-on-row-below layout:
+# words at column X carry the label, words at column X on the next y-bucket
+# below carry the value. The number of columns differs (3-col old BR, 4-col
+# new BR Datavärdering, 6-col Småhus, 3-col Fastighetsrapport), but the
+# per-cell algorithm is identical.
+#
+# Row distance is bounded — without the cap, an EMPTY cell (e.g. the Adress
+# row in the Bengtsfors fastighet sample) would silently inherit the label
+# value of the NEXT section that happens to sit in the same column further
+# down the page.
 
-_ROW_TOL = 3.0   # pt: words within this `top` are the same row
-_COL_TOL = 3.0   # pt: words within this `x0` are the same column
+_ROW_TOL = 3.0          # pt: words within this `top` are the same row
+_COL_TOL = 3.0          # pt: words within this `x0` are the same column
+_MAX_VALUE_BELOW = 18.0  # pt: max y-gap between a label and its value row
 
 
 def _uc_word_below(
@@ -194,32 +200,34 @@ def _uc_word_below(
     label_text: str,
     formatter: Callable[[str], str | None] | None = None,
 ) -> str | None:
-    """Find the row below a label word; return its same-column cell text.
-
-    Only fires when the PDF is a UC-tabular Värdeutlåtande, so unrelated
-    PDFs with the same label phrase elsewhere (e.g. the Fastighetsbyrån
-    prose containing 'Marknadsvärde' inline) are not matched.
-    """
+    """Find the row below a label word in a UC-tabular Värdeutlåtande."""
     if not _is_datavardering_uc(ctx):
         return None
-    words = ctx.page1_words
-    label = next(
-        (w for w in words if w["text"] == label_text),
-        None,
-    )
-    if label is None:
-        return None
-    raw = _row_below_in_column(words, label)
+    raw = _label_text_below_in_column(ctx, label_text)
     if raw is None:
         return None
     return formatter(raw) if formatter else raw
 
 
+def _label_text_below_in_column(ctx: ParseContext, label_text: str) -> str | None:
+    """Find the label word in pdfplumber's word grid, return the row below.
+
+    No PDF-class guard — used by both UC tabular and Fastighetsrapport
+    strategies, each of which guards externally.
+    """
+    label = next((w for w in ctx.page1_words if w["text"] == label_text), None)
+    if label is None:
+        return None
+    return _row_below_in_column(ctx.page1_words, label)
+
+
 def _row_below_in_column(words: tuple[dict, ...], anchor: dict) -> str | None:
     """Return the cell text on the row immediately below `anchor`.
 
-    Filters to words whose x0 is within `_COL_TOL` of the anchor's x0
-    AND whose top sits in the next sustained y-bucket below the anchor.
+    Filters to words whose x0 is within `_COL_TOL` of the anchor's x0,
+    whose top sits in the next sustained y-bucket below, AND whose
+    y-distance is within `_MAX_VALUE_BELOW`. The cap prevents an empty
+    cell from inheriting a label further down the page.
     """
     same_col = [
         w for w in words
@@ -229,6 +237,8 @@ def _row_below_in_column(words: tuple[dict, ...], anchor: dict) -> str | None:
         return None
     same_col.sort(key=lambda w: w["top"])
     target_top = same_col[0]["top"]
+    if target_top - anchor["top"] > _MAX_VALUE_BELOW:
+        return None
     row_words = [
         w for w in same_col if abs(w["top"] - target_top) <= _ROW_TOL
     ]
@@ -237,41 +247,27 @@ def _row_below_in_column(words: tuple[dict, ...], anchor: dict) -> str | None:
     return text or None
 
 
+def _canonical_via_fitz(ctx: ParseContext, raw: str) -> str:
+    """Look up the canonical spaced form of `raw` in `fitz_full_text`.
+
+    pdfplumber concatenates adjacent words inside one column cell into a
+    single token (`HannaRydhsgata12LGH1303`), but PyMuPDF preserves the
+    inter-word spaces (`Hanna Rydhs gata 12 LGH 1303`). Stripping spaces
+    from both and matching gives us the human-readable form without
+    having to hand-tune a CamelCase splitter for every Swedish compound
+    street name.
+    """
+    target = re.sub(r"\s+", "", raw)
+    if not target:
+        return raw
+    for line in ctx.fitz_full_text.splitlines():
+        candidate = line.strip()
+        if re.sub(r"\s+", "", candidate) == target:
+            return candidate
+    return raw
+
+
 # ---------- objekt assembly helpers ----------
-
-# Concatenated UC-cell with no spaces, e.g. 'HannaRydhsgata12LGH1303'
-# — UC's old BR PDF emits one cell as one word. Split when CamelCase-or-digit
-# boundary, restore street suffixes.
-_STREET_SUFFIXES = (
-    "gata", "vagen", "vägen", "gränden", "stigen", "allén",
-    "plan", "torget", "backen", "kullen",
-)
-
-
-def _expand_camel_concat(raw: str) -> str:
-    """`HannaRydhsgata12LGH1303` → `Hanna Rydhs gata 12 LGH 1303`."""
-    s = re.sub(r"(?<=[a-zåäö])(?=[A-ZÅÄÖ])", " ", raw)
-    s = re.sub(r"(?<=[A-Za-zÅÄÖåäö])(?=\d)", " ", s)
-    s = re.sub(r"(?<=\d)(?=[A-Za-zÅÄÖåäö])", " ", s)
-    parts = s.split()
-    out: list[str] = []
-    for p in parts:
-        suffix = _trailing_street_suffix(p)
-        if suffix and len(p) > len(suffix):
-            out.append(p[: -len(suffix)])
-            out.append(suffix)
-        else:
-            out.append(p)
-    return " ".join(out)
-
-
-def _trailing_street_suffix(token: str) -> str | None:
-    lower = token.lower()
-    for suffix in _STREET_SUFFIXES:
-        if lower.endswith(suffix) and lower != suffix:
-            return suffix
-    return None
-
 
 # `Hanna Rydhs gata 12 LGH 1303` → ('Hanna Rydhs gata 12', '1303')
 _ADDRESS_WITH_LGH_RE = re.compile(r"^(?P<street>.+?)\s+LGH\s+(?P<lgh>\d+)\s*$")
@@ -293,20 +289,6 @@ def _expand_postort(raw: str) -> tuple[str | None, str | None]:
     postnr = m.group(1)
     locality = m.group(2).strip()
     return postnr, locality.title() if locality.isupper() else locality
-
-
-def _expand_concat_titlecase(raw: str) -> str:
-    """`BengtsforsNärsidan1:21` → `Bengtsfors Närsidan 1:21`."""
-    s = re.sub(r"(?<=[a-zåäö])(?=[A-ZÅÄÖ])", " ", raw)
-    s = re.sub(r"(?<=[A-Za-zÅÄÖåäö])(?=\d)", " ", s)
-    s = re.sub(r"\s+", " ", s).strip()
-    parts = []
-    for tok in s.split():
-        if tok and tok[0].islower() and tok.isalpha():
-            parts.append(tok.capitalize())
-        else:
-            parts.append(tok)
-    return " ".join(parts)
 
 
 # ---------- per-slot strategy implementations ----------
@@ -381,10 +363,11 @@ def _objekt_uc_br_assembled(ctx: ParseContext) -> str | None:
     orgnr_raw = _uc_word_below(ctx, "Organisationsnummer")
     if not (adress_raw and forening_raw and orgnr_raw):
         return None
-    _, lgh = _split_address_and_lgh(_expand_camel_concat(adress_raw))
+    adress_spaced = _canonical_via_fitz(ctx, adress_raw)
+    _, lgh = _split_address_and_lgh(adress_spaced)
     if not lgh:
         return None
-    forening = _expand_camel_concat(forening_raw)
+    forening = _canonical_via_fitz(ctx, forening_raw)
     orgnr = _compact_digits(orgnr_raw)
     if not orgnr:
         return None
@@ -397,7 +380,7 @@ def _objekt_uc_smahus_fastighetsbeteckning(ctx: ParseContext) -> str | None:
     raw = _uc_word_below(ctx, "Fastighetsbeteckning")
     if not raw:
         return None
-    return _expand_concat_titlecase(raw)
+    return _canonical_via_fitz(ctx, raw)
 
 
 def _objekt_fastighetsrapport_beteckning(ctx: ParseContext) -> str | None:
@@ -406,35 +389,28 @@ def _objekt_fastighetsrapport_beteckning(ctx: ParseContext) -> str | None:
     The layout is a 3-cell header row: `Beteckning / Senaste ändring
     allmänna delen / Totalareal`. The cell below `Beteckning` carries
     the property identifier, e.g. `Bengtsfors NÄRSIDAN 1:21`. UPPERCASE
-    fastighet block is titlecased to match the template convention.
+    fastighet block (and its hyphenated parts) is titlecased to match
+    the docx template convention.
     """
     if not _is_fastighetsrapport(ctx):
         return None
-    raw = _uc_label_text_below(ctx, "Beteckning")
+    raw = _label_text_below_in_column(ctx, "Beteckning")
     if not raw:
         return None
-    parts = raw.split()
-    out = []
-    for tok in parts:
-        if tok.isalpha() and tok.isupper():
-            out.append(tok.title())
-        else:
-            out.append(tok)
-    return " ".join(out)
+    spaced = _canonical_via_fitz(ctx, raw)
+    parts = []
+    for tok in spaced.split():
+        parts.append(_titlecase_upper_alpha(tok))
+    return " ".join(parts)
 
 
-def _uc_label_text_below(ctx: ParseContext, label_text: str) -> str | None:
-    """Same as `_uc_word_below` but without the UC-tabular guard.
-
-    Used by the Fastighetsrapport strategies which share the same
-    word-grid layout (label row + value row in same column) without the
-    UC Bostad banner.
-    """
-    words = ctx.page1_words
-    label = next((w for w in words if w["text"] == label_text), None)
-    if label is None:
-        return None
-    return _row_below_in_column(words, label)
+def _titlecase_upper_alpha(token: str) -> str:
+    """Titlecase a token, splitting on hyphens so `JULITA-ÄNGTORP` → `Julita-Ängtorp`."""
+    if "-" in token:
+        return "-".join(_titlecase_upper_alpha(part) for part in token.split("-"))
+    if token.isalpha() and token.isupper():
+        return token.title()
+    return token
 
 
 def _objekt_lgh_assembled(ctx: ParseContext) -> str | None:
@@ -474,15 +450,15 @@ def _adress_uc_below_label(ctx: ParseContext) -> str | None:
     raw = _uc_word_below(ctx, "Adress")
     if not raw:
         return None
-    expanded = _expand_camel_concat(raw)
-    street, _ = _split_address_and_lgh(expanded)
+    spaced = _canonical_via_fitz(ctx, raw)
+    street, _ = _split_address_and_lgh(spaced)
     return street
 
 
 def _adress_fastighetsrapport(ctx: ParseContext) -> str | None:
     if not _is_fastighetsrapport(ctx):
         return None
-    m = re.search(r"\nAdress\n([^\n]+)\n", ctx.page1_text)
+    m = re.search(r"\nAdress\n([^\n]+)\n", ctx.fitz_full_text)
     if not m:
         return None
     line = m.group(1).strip()
@@ -515,10 +491,13 @@ def _kommun_uc_postort_from_addr(ctx: ParseContext) -> str | None:
     """Fall back to the postort line below `Adress` when no `Kommun` cell.
 
     UC Småhus + the newer BR Datavärdering put a `<postnr> <ort>` line
-    on the row two-below `Adress`. Used as a fallback for kommun when
-    the `Kommun` label is absent or its cell is empty.
+    on the row two-below `Adress`. Only fires when the address row
+    immediately below `Adress` is non-empty (otherwise we'd walk past
+    the empty cell into the next section's labels).
     """
     if not _is_datavardering_uc(ctx):
+        return None
+    if _uc_word_below(ctx, "Adress") is None:
         return None
     words = ctx.page1_words
     label = next((w for w in words if w["text"] == "Adress"), None)
@@ -534,14 +513,14 @@ def _kommun_uc_postort_from_addr(ctx: ParseContext) -> str | None:
             seen_buckets.append(w["top"])
         if len(seen_buckets) == 2:
             break
-    if len(seen_buckets) < 2:
+    if len(seen_buckets) < 2 or seen_buckets[1] - label["top"] > _MAX_VALUE_BELOW * 2:
         return None
     second_top = seen_buckets[1]
     row = [w for w in same_col if abs(w["top"] - second_top) <= _ROW_TOL]
     row.sort(key=lambda w: w["x0"])
     if not row:
         return None
-    raw = " ".join(w["text"] for w in row).strip()
+    raw = _canonical_via_fitz(ctx, " ".join(w["text"] for w in row).strip())
     _, locality = _expand_postort(raw)
     return locality
 
@@ -549,7 +528,7 @@ def _kommun_uc_postort_from_addr(ctx: ParseContext) -> str | None:
 def _kommun_fastighetsrapport(ctx: ParseContext) -> str | None:
     if not _is_fastighetsrapport(ctx):
         return None
-    m = re.search(r"\nAdress\n([^\n]+)\n", ctx.page1_text)
+    m = re.search(r"\nAdress\n([^\n]+)\n", ctx.fitz_full_text)
     if not m:
         return None
     line = m.group(1).strip()
@@ -673,10 +652,10 @@ def _document_date_lgh_utskriftsdatum(ctx: ParseContext) -> str | None:
 def _document_date_fastighetsrapport(ctx: ParseContext) -> str | None:
     if not _is_fastighetsrapport(ctx):
         return None
-    raw = _uc_label_text_below(ctx, "Aktualitetsdatum")
-    if raw:
+    raw = _label_text_below_in_column(ctx, "Aktualitetsdatum")
+    if raw and re.match(r"^\d{4}-\d{2}-\d{2}$", raw):
         return raw
-    m = re.search(r"Aktualitetsdatum\s+inskrivning\s*\n([0-9-]+)", ctx.page1_text)
+    m = re.search(r"Aktualitetsdatum\s+inskrivning\s*\n(\d{4}-\d{2}-\d{2})", ctx.fitz_full_text)
     return m.group(1) if m else None
 
 
