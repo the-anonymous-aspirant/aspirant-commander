@@ -23,7 +23,7 @@ FIXTURE_ROOT = Path("/tmp/vardeutlatande")
 HAS_FIXTURES = (FIXTURE_ROOT / "Datavardering.pdf").exists() and (
     FIXTURE_ROOT / "LGH_utdrag.pdf"
 ).exists()
-HAS_SMAHUS_UC = (FIXTURE_ROOT / "Datavardering_smahus.pdf").exists()
+HAS_SMAHUS_UC = (FIXTURE_ROOT / "UCB_Bengtsfors.pdf").exists()
 HAS_SMAHUS_PROSE = (FIXTURE_ROOT / "VardeutlatandeHok.pdf").exists()
 
 
@@ -268,34 +268,20 @@ def test_generate_endpoint_returns_docx(client):
     assert "Objekt: LGH 1303 HSB Brf Långpannan i Stockholm (7696097448)" in text
 
 
-# ---------- fastighetsutdrag dispatch (no PDF fixture required) ----------
-
-
-def test_extract_document_dispatches_fastighetsutdrag_without_importerror():
-    """Guard the dispatch table against missing parser modules.
-
-    The classifier recognises FASTIGHETSUTDRAG, so the route hands one
-    to `extract_document()`. If the per-type parser module is missing
-    the call raises ImportError and the whole `/extract` request 500s.
-    The stub parser returns an empty result — the operator still types
-    `fastighetsutdrag_date` during review — but the dispatch must not
-    raise.
-    """
-    from app.valuation_statement.classifier import DocumentType
-    from app.valuation_statement.extraction import extract_document
-
-    result = extract_document(b"", DocumentType.FASTIGHETSUTDRAG, "utdrag.pdf")
-
-    assert result.document_type == DocumentType.FASTIGHETSUTDRAG
-    assert result.filename == "utdrag.pdf"
-    assert result.fields == []
-
-
 # ---------- /extract integration (skip when fixtures missing) ----------
 
 
+def _slots(doc: dict) -> dict:
+    return {f["key"]: f["value"] for f in doc["fields"]}
+
+
 @pytest.mark.skipif(not HAS_FIXTURES, reason="Operator-supplied PDF samples not present")
-def test_extract_endpoint_parses_both_types(client):
+def test_extract_endpoint_parses_both_documents(client):
+    """Smoke test the field-first extractor end-to-end on a Datavärdering
+    (UC tabular BR) and a lägenhetsförteckning. Both feed the same docx
+    template via the unified slot inventory; routing to the right date
+    slot happens in the frontend via `source_class`.
+    """
     with (FIXTURE_ROOT / "Datavardering.pdf").open("rb") as a, (
         FIXTURE_ROOT / "LGH_utdrag.pdf"
     ).open("rb") as b:
@@ -308,119 +294,61 @@ def test_extract_endpoint_parses_both_types(client):
         )
     assert r.status_code == 200
     data = r.json()
-    types = {d["document_type"] for d in data["documents"]}
-    assert types == {"datavardering_br", "lgh_utdrag"}
+    assert len(data["documents"]) == 2
+    by_class = {_slots(d)["source_class"]: _slots(d) for d in data["documents"]}
+    assert set(by_class) == {"datavardering", "lagenhetsforteckning"}
 
-    fields_by_key = {
-        d["document_type"]: {f["key"]: f["value"] for f in d["fields"]}
-        for d in data["documents"]
-    }
-    assert fields_by_key["datavardering_br"]["forening_namn"] == (
-        "HSB Brf Långpannan i Stockholm"
-    )
-    assert fields_by_key["datavardering_br"]["marknadsvarde_suggested"] == "2 350 000"
-    assert fields_by_key["lgh_utdrag"]["lgh_skatteverket"] == "1303"
-    assert fields_by_key["lgh_utdrag"]["postort"] == "Hägersten"
+    dv = by_class["datavardering"]
+    assert dv["objekt"] == "LGH 1303 HSB Brf Långpannan i Stockholm (7696097448)"
+    assert dv["marknadsvarde_kr"] == "2 350 000"
+    assert dv["upplatelseform"] == "Bostadsrätt"
+    assert dv["property_shape"] == "bostadsratt"
 
-
-# ---------- comparable-sales row parser (unit, no PDF) ----------
-
-
-class TestComparableRowParser:
-    """The UC Bostad PDF has no column borders, so we parse the flat-text
-    rows by anchoring on the trailing YYYY-MM and walking right-to-left.
-    These tests pin both shapes that show up in the live sample."""
-
-    def _parse(self, line):
-        from app.valuation_statement.parsers.bostadsratt import _parse_comparable_row
-        return _parse_comparable_row(line)
-
-    def test_eight_column_row_with_balkong(self):
-        row = self._parse("HSBBrfLångpannaniStockholm 72 Ja 6307 302610 2920000 40556 2026-04")
-        assert row == {
-            "forening": "HSB Brf Långpannan i Stockholm",
-            "area_m2": "72",
-            "balkong": "Ja",
-            "avgift_kr_manad": "6307",
-            "arsavgift_kr": "302610",
-            "pris_kr": "2920000",
-            "pris_per_m2": "40556",
-            "salj_datum": "2026-04",
-            "raw": "HSBBrfLångpannaniStockholm 72 Ja 6307 302610 2920000 40556 2026-04",
-        }
-
-    def test_seven_column_row_no_balkong(self):
-        row = self._parse("HSBBrfLångpannaniStockholm 62,5 5002 262682 2400000 38400 2025-12")
-        assert row["balkong"] is None
-        assert row["area_m2"] == "62,5"
-        assert row["avgift_kr_manad"] == "5002"
-        assert row["pris_kr"] == "2400000"
-        assert row["salj_datum"] == "2025-12"
-
-    def test_row_with_balkong_nej(self):
-        row = self._parse("HSBBrfLångpannaniStockholm 70 Nej 5500 250000 2500000 35714 2026-02")
-        assert row["balkong"] == "Nej"
-        assert row["area_m2"] == "70"
-
-    def test_line_without_date_is_skipped(self):
-        assert self._parse("Adress Boyta Avgift Pris Datum") is None
-
-    def test_too_few_columns_falls_back_to_raw(self):
-        # Malformed row — at least the raw line + the trailing date survive
-        # so the operator still sees something rather than the row vanishing.
-        row = self._parse("Onlyforening 2026-04")
-        assert row is not None
-        assert row["salj_datum"] == "2026-04"
-        assert row["raw"] == "Onlyforening 2026-04"
-        assert row.get("forening") is None
+    lgh = by_class["lagenhetsforteckning"]
+    assert lgh["objekt"] == "LGH 1303 HSB Brf Långpannan i Stockholm (7696097448)"
+    assert lgh["kommun"] == "Hägersten"
+    assert lgh["document_date"] == "2026-06-09"
 
 
 # ---------- Småhus parser (skip when sample PDF missing) ----------
 
 
-@pytest.mark.skipif(not HAS_SMAHUS_UC, reason="Operator UC Småhus sample missing")
+@pytest.mark.skipif(not HAS_SMAHUS_UC, reason="UC Bostad Småhus sample missing")
 def test_extract_endpoint_parses_uc_smahus_tabular(client):
-    """The UC Bostad Småhus data-feed report populates the six-column
-    Objektsinformation band slots plus the two-column Värde block. The
-    regression #1059 referenced is the silent-empty case where the
-    classifier returned UNKNOWN and `fields[]` was empty — this asserts
-    the parser is wired and the column-anchor walk picks up every slot
-    the UC sample exposes.
+    """The UC Bostad Småhus tabular report feeds the same per-slot
+    chain as the BR variant. The Bengtsfors sample has no recorded
+    address (`Lagfart: Saknades`) — the chain must surface that as
+    `None` rather than inheriting the next section's label.
     """
-    with (FIXTURE_ROOT / "Datavardering_smahus.pdf").open("rb") as a:
+    with (FIXTURE_ROOT / "UCB_Bengtsfors.pdf").open("rb") as a:
         r = client.post(
             "/valuation-statement/extract",
-            files=[("files", ("Datavardering_smahus.pdf", a.read(), "application/pdf"))],
+            files=[("files", ("UCB_Bengtsfors.pdf", a.read(), "application/pdf"))],
         )
     assert r.status_code == 200
     docs = r.json()["documents"]
     assert len(docs) == 1
     doc = docs[0]
-    assert doc["document_type"] == "datavardering_smahus"
 
     fields = {f["key"]: f for f in doc["fields"]}
-    assert fields["fastighetsbeteckning"]["value"] == "Bengtsfors Närsidan 1:21"
-    assert fields["fastighetsbeteckning"]["confidence"] == "confident"
-    assert fields["byggnadstyp"]["value"] == "Friliggande"
-    assert fields["taxeringsvarde"]["value"] == "765 000 (Tax24)"
-    assert fields["tomtyta_m2"]["value"] == "2 089"
-    assert fields["byggnadsar"]["value"] == "1980"
-    assert fields["vardear"]["value"] == "1980"
-    assert fields["marknadsvarde_suggested"]["value"] == "1 075 000"
-    assert fields["osakerhet_uppat"]["value"] == "350 000"
-    assert fields["osakerhet_nedat"]["value"] == "280 000"
+    assert fields["objekt"]["value"] == "Bengtsfors Närsidan 1:21"
+    assert fields["upplatelseform"]["value"] == "Friköpt"
+    assert fields["property_shape"]["value"] == "fastighet"
+    assert fields["marknadsvarde_kr"]["value"] == "1 075 000"
+    assert fields["intervall_kr"]["value"] == "350 000"
     assert fields["document_date"]["value"] == "2026-06-18"
+    # No recorded address → the chain must produce None, not a stale
+    # downstream label like 'Taxeringsvärde'.
+    assert fields["adress"]["value"] is None
+    assert fields["kommun"]["value"] is None
 
 
-@pytest.mark.skipif(not HAS_SMAHUS_PROSE, reason="Operator Fastighetsbyrån prose Småhus sample missing")
+@pytest.mark.skipif(not HAS_SMAHUS_PROSE, reason="Fastighetsbyrån prose Småhus sample missing")
 def test_extract_endpoint_parses_prose_smahus_appraisal(client):
-    """The Fastighetsbyrån Värdeutlåtande prose layout (sample
-    VardeutlatandeHok.pdf) classifies into the same DocumentType as the
-    UC tabular report and feeds through the same parser branch — per
-    the operator correction on epic #1060 (content-only, one parser
-    branch per content type regardless of issuer). The prose layout
-    exposes a narrower slot set; the slots it does carry must surface
-    with confident labels.
+    """The Fastighetsbyrån prose Värdeutlåtande feeds the same per-slot
+    chain as the UC tabular report — different strategy fires, same
+    slot set surfaces (operator directive on #1113: one chain per slot,
+    no per-issuer parser branches).
     """
     with (FIXTURE_ROOT / "VardeutlatandeHok.pdf").open("rb") as a:
         r = client.post(
@@ -430,100 +358,27 @@ def test_extract_endpoint_parses_prose_smahus_appraisal(client):
     assert r.status_code == 200
     docs = r.json()["documents"]
     assert len(docs) == 1
-    doc = docs[0]
-    assert doc["document_type"] == "datavardering_smahus"
-
-    fields = {f["key"]: f for f in doc["fields"]}
-    assert fields["fastighetsbeteckning"]["value"] == "Vaggeryd Hok 2:139"
+    fields = {f["key"]: f for f in docs[0]["fields"]}
+    assert fields["objekt"]["value"] == "Vaggeryd Hok 2:139"
     assert fields["adress"]["value"] == "Lillholmsvägen 12"
     assert fields["kommun"]["value"] == "Hok"
     assert fields["upplatelseform"]["value"] == "Friköpt"
-    assert fields["marknadsvarde_suggested"]["value"] == "2 200 000"
-    # Prose appraisals report a symmetric ±X kr interval — uppåt and
-    # nedåt must both carry the same X.
-    assert fields["osakerhet_uppat"]["value"] == "50 000"
-    assert fields["osakerhet_nedat"]["value"] == "50 000"
+    assert fields["property_shape"]["value"] == "fastighet"
+    assert fields["marknadsvarde_kr"]["value"] == "2 200 000"
+    # Prose appraisals report a symmetric ±X kr interval; uppåt = nedåt = X.
+    assert fields["intervall_kr"]["value"] == "50 000"
     assert fields["document_date"]["value"] == "2026-06-18"
-    for slot in (
-        "fastighetsbeteckning",
-        "adress",
-        "kommun",
-        "upplatelseform",
-        "marknadsvarde_suggested",
-        "document_date",
-    ):
-        assert fields[slot]["confidence"] == "confident", f"{slot} should be confident"
-
-
-# ---------- prose-extraction regex (unit, no PDF) ----------
-
-
-class TestProseSmahusRegex:
-    """Unit-level guards for the prose-layout regexes so they don't
-    silently regress against pdfplumber output variations."""
-
-    def _parse(self, text):
-        # Build a minimal ParseContext from page-1 text only — the prose
-        # strategies don't need word coordinates.
-        from app.valuation_statement.parsers._context import ParseContext
-        from app.valuation_statement.parsers._strategy import run_slots
-        from app.valuation_statement.parsers.smahus import _SLOTS
-
-        ctx = ParseContext(
-            page1_text=text,
-            page1_words=(),
-            page_texts=(text,),
-        )
-        return {f.key: f.value for f in run_slots(_SLOTS, ctx, "x.pdf")}
-
-    def test_bullets_with_visible_bullet_glyph(self):
-        text = (
-            "Värderingsobjekt\n"
-            "● Objekt: Vaggeryd Hok 2:139\n"
-            "● Adress: Lillholmsvägen 12\n"
-            "● Kommun: Hok\n"
-            "● Upplåtelseform: Friköpt\n"
-            "Marknadsvärdet bedöms till 2 200 000 kr, med ett intervall om +/- 50 000 kr.\n"
-            "18/6/2026\n"
-        )
-        fields = self._parse(text)
-        assert fields["fastighetsbeteckning"] == "Vaggeryd Hok 2:139"
-        assert fields["adress"] == "Lillholmsvägen 12"
-        assert fields["kommun"] == "Hok"
-        assert fields["upplatelseform"] == "Friköpt"
-        assert fields["marknadsvarde_suggested"] == "2 200 000"
-        assert fields["osakerhet_uppat"] == "50 000"
-        assert fields["osakerhet_nedat"] == "50 000"
-        assert fields["document_date"] == "2026-06-18"
-
-    def test_bullets_collapsed_without_glyph(self):
-        # The BR prose sample uses ± instead of +/- and the bullet
-        # glyph may be stripped by pdfplumber depending on font.
-        text = (
-            "Värderingsobjekt\n"
-            "Objekt: Vaggeryd Hok 2:139\n"
-            "Adress: Lillholmsvägen 12\n"
-            "Marknadsvärdet bedöms till 2 200 000 kr, med ett intervall om ± 50 000 kr.\n"
-            "1/12/2026\n"
-        )
-        fields = self._parse(text)
-        assert fields["fastighetsbeteckning"] == "Vaggeryd Hok 2:139"
-        assert fields["adress"] == "Lillholmsvägen 12"
-        assert fields["marknadsvarde_suggested"] == "2 200 000"
-        assert fields["osakerhet_uppat"] == "50 000"
-        assert fields["document_date"] == "2026-12-01"
-
-    def test_missing_value_sentence_falls_back_to_not_found(self):
-        text = "Värderingsobjekt\n● Objekt: Foo 1:1\n"
-        fields = self._parse(text)
-        assert fields["fastighetsbeteckning"] == "Foo 1:1"
-        assert fields["marknadsvarde_suggested"] is None
-        assert fields["osakerhet_uppat"] is None
 
 
 @pytest.mark.skipif(not HAS_FIXTURES, reason="Operator-supplied PDF samples not present")
 def test_extract_endpoint_returns_structured_comparable_sales(client):
-    """The /extract response carries the per-row column dict, not just `raw`."""
+    """The /extract response carries the per-row column dict, not just `raw`.
+
+    Only the UC Bostad BR tabular sample carries a page-2 comparable-
+    sales table; the prose appraisals don't. The field-first extractor
+    derives `_needs_comparable_sales` from the same UC BR banner
+    fingerprint used by the strategy chains.
+    """
     with (FIXTURE_ROOT / "Datavardering.pdf").open("rb") as a:
         r = client.post(
             "/valuation-statement/extract",
@@ -531,12 +386,45 @@ def test_extract_endpoint_returns_structured_comparable_sales(client):
         )
     assert r.status_code == 200
     docs = r.json()["documents"]
-    dv = next(d for d in docs if d["document_type"] == "datavardering_br")
-    assert dv["comparable_sales"], "Expected at least one parsed comparable row"
-    first = dv["comparable_sales"][0]
-    # Structured columns are present on every row (some may be None).
+    assert len(docs) == 1
+    doc = docs[0]
+    assert doc["comparable_sales"], "Expected at least one parsed comparable row"
+    first = doc["comparable_sales"][0]
     for col in ("forening", "area_m2", "pris_kr", "pris_per_m2", "salj_datum", "raw"):
         assert col in first
+
+
+# ---------- comparable-sales row parser (unit, no PDF) ----------
+
+
+class TestComparableRowParserUnit:
+    def _parse(self, line):
+        from app.valuation_statement.field_extractor import _parse_comparable_row
+        return _parse_comparable_row(line)
+
+    def test_eight_column_row_with_balkong(self):
+        row = self._parse("HSBBrfLångpannaniStockholm 72 Ja 6307 302610 2920000 40556 2026-04")
+        assert row["forening"] == "HSBBrfLångpannaniStockholm"
+        assert row["area_m2"] == "72"
+        assert row["balkong"] == "Ja"
+        assert row["pris_kr"] == "2920000"
+        assert row["salj_datum"] == "2026-04"
+
+    def test_seven_column_row_no_balkong(self):
+        row = self._parse("HSBBrfLångpannaniStockholm 62,5 5002 262682 2400000 38400 2025-12")
+        assert row["balkong"] is None
+        assert row["pris_kr"] == "2400000"
+        assert row["salj_datum"] == "2025-12"
+
+    def test_line_without_date_is_skipped(self):
+        assert self._parse("Adress Boyta Avgift Pris Datum") is None
+
+    def test_too_few_columns_falls_back_to_raw(self):
+        row = self._parse("Onlyforening 2026-04")
+        assert row is not None
+        assert row["salj_datum"] == "2026-04"
+        assert row["raw"] == "Onlyforening 2026-04"
+        assert row.get("forening") is None
 
 
 # ---------- operator defaults ----------

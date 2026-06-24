@@ -4,10 +4,6 @@
 # (datavärdering, lägenhetsförteckning, fastighetsutdrag) and populates the
 # canonical Värdeutlåtande Word template for download.
 
-from app.valuation_statement.classifier import (
-    DocumentType,
-    classify_pdf,
-)
 from app.valuation_statement.extraction import (
     ExtractedField,
     ExtractionResult,
@@ -15,9 +11,7 @@ from app.valuation_statement.extraction import (
 )
 
 __all__ = [
-    "DocumentType",
     "ExtractedField",
     "ExtractionResult",
-    "classify_pdf",
     "extract_document",
 ]

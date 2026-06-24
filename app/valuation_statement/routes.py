@@ -14,7 +14,6 @@ from app.valuation_statement.api_schemas import (
     GenerateRequest,
     OperatorDefaults,
 )
-from app.valuation_statement.classifier import DocumentType, classify_pdf
 from app.valuation_statement.extraction import extract_document
 from app.valuation_statement.pdf_export import (
     LibreOfficeConversionFailed,
@@ -33,7 +32,7 @@ MAX_PDF_BYTES = 25 * 1024 * 1024  # 25 MB per file
 
 @router.post("/extract", response_model=ExtractResponse)
 async def extract_uploads(files: list[UploadFile] = File(...)):
-    """Classify + parse one or more uploaded PDFs.
+    """Parse one or more uploaded PDFs via the field-first extractor.
 
     Returns one ExtractionResultOut per uploaded file plus the persisted
     operator-defaults block (appraiser identity, default likviditet).
@@ -55,11 +54,9 @@ async def extract_uploads(files: list[UploadFile] = File(...)):
                 detail=f"{upload.filename}: file is not a PDF.",
             )
 
-        doc_type = classify_pdf(pdf_bytes)
-        parsed = extract_document(pdf_bytes, doc_type, upload.filename or "<unnamed>")
+        parsed = extract_document(pdf_bytes, upload.filename or "<unnamed>")
         results.append(
             ExtractionResultOut(
-                document_type=parsed.document_type,
                 filename=parsed.filename,
                 fields=[
                     ExtractedFieldOut(**asdict(field)) for field in parsed.fields
