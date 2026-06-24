@@ -659,6 +659,13 @@ def _document_date_fastighetsrapport(ctx: ParseContext) -> str | None:
     return m.group(1) if m else None
 
 
+def _document_date_fastighetsrapport_footer(ctx: ParseContext) -> str | None:
+    if not _is_fastighetsrapport(ctx):
+        return None
+    m = _FOOTER_DATE_RE.search(ctx.fitz_full_text)
+    return m.group(1) if m else None
+
+
 # ---------- LGH-utdrag shared cell parsing ----------
 #
 # HSB ships labels duplicated 4× per line and may drop ligatures. We dedup
@@ -1029,6 +1036,11 @@ _DOCUMENT_DATE_SLOT = Slot(
             "fastighetsrapport_aktualitetsdatum",
             "Lantmäteriet Fastighetsrapport: row below 'Aktualitetsdatum inskrivning' label",
             _document_date_fastighetsrapport,
+        ),
+        Strategy(
+            "fastighetsrapport_footer_timestamp",
+            "Lantmäteriet Fastighetsrapport: 'YYYY-MM-DD HH:MM' generation stamp at page-1 footer",
+            _document_date_fastighetsrapport_footer,
         ),
     ),
 )
