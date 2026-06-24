@@ -1,19 +1,16 @@
 {
-  "_description": "UC Bostad Värdeutlåtande Bostadsrätt — tabular data-feed report. Three-column page-1 grid; page-2 comparable-sales table.",
-  "document_type": "datavardering_br",
+  "_description": "UC Bostad BR data-feed report (old 3-column layout). HSB Brf Långpannan, Stockholm. Has page-2 comparable-sales table.",
   "fields": {
-    "forening_namn": "HSB Brf Långpannan i Stockholm",
-    "organisationsnummer": "7696097448",
-    "lgh_internal": "1303",
-    "address_street": "Hanna Rydhs gata 12",
-    "postnummer": "12950",
-    "postort": "Hägersten",
-    "kommun_datavardering": "Stockholm",
+    "objekt": "LGH 1303 HSB Brf Långpannan i Stockholm (7696097448)",
+    "objekt_short": "LGH 1303 HSB Brf Långpannan i Stockholm",
+    "adress": "Hanna Rydhs gata 12",
+    "kommun": "Stockholm",
     "upplatelseform": "Bostadsrätt",
-    "marknadsvarde_suggested": "2 350 000",
-    "osakerhet_uppat": "170 000",
-    "osakerhet_nedat": "170 000",
-    "document_date": "2026-06-02"
+    "marknadsvarde_kr": "2 350 000",
+    "intervall_kr": "170 000",
+    "document_date": "2026-06-02",
+    "source_class": "datavardering",
+    "property_shape": "bostadsratt"
   },
   "comparable_sales_count": 15
 }

@@ -1,22 +1,16 @@
 {
-  "_description": "HSB Lägenhetsuppgifter (lägenhetsförteckning) — auxiliary doc; feeds objekt/adress/postort slots in the BR review flow. HSB's CMap drops some ligatures and surfaces `Forteckning över BareOten 1 1` for the fastighetsbeteckning slot (known glyph-drop, captured as-is — the LGH extract is not the canonical source of the fastighetsbeteckning slot in any case).",
-  "document_type": "lgh_utdrag",
+  "_description": "HSB lägenhetsförteckning (Långpannan). Ligature-damaged labels via PyMuPDF.",
   "fields": {
-    "lgh_internal_hsb": "27",
-    "lgh_skatteverket": "1303",
-    "antal_rum": "2",
-    "boarea": "62.5 kvm",
-    "vaning": "3",
+    "objekt": "LGH 1303 HSB Brf Långpannan i Stockholm (7696097448)",
+    "objekt_short": "LGH 1303 HSB Brf Långpannan i Stockholm",
     "adress": "Hanna Rydhs Gata 12",
-    "forvarvsdatum": "2018-11-08",
-    "forening_namn": "HSB Brf Långpannan i Stockholm",
-    "fastighetsbeteckning": "BareOten 1 1",
-    "organisationsnummer": "7696097448",
-    "registrerad_ekonomisk_plan": "2004-02-20",
-    "andel": "100 %",
-    "postnummer": "12950",
-    "postort": "Hägersten",
-    "document_date": "2026-06-09"
+    "kommun": "Hägersten",
+    "upplatelseform": "Bostadsrätt",
+    "marknadsvarde_kr": null,
+    "intervall_kr": null,
+    "document_date": "2026-06-09",
+    "source_class": "lagenhetsforteckning",
+    "property_shape": "bostadsratt"
   },
   "comparable_sales_count": 0
 }

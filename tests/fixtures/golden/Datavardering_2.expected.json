@@ -1,0 +1,16 @@
+{
+  "_description": "UC Bostad BR data-feed report (post-2026 6-column layout, same as Småhus). HSB Brf Hilda, Malmö.",
+  "fields": {
+    "objekt": "LGH 1002 HSB Brf Hilda i Malmö (7460010163)",
+    "objekt_short": "LGH 1002 HSB Brf Hilda i Malmö",
+    "adress": "Von Lingens väg 112",
+    "kommun": "Malmö",
+    "upplatelseform": "Bostadsrätt",
+    "marknadsvarde_kr": "1 610 000",
+    "intervall_kr": "420 000",
+    "document_date": "2026-06-22",
+    "source_class": "datavardering",
+    "property_shape": "bostadsratt"
+  },
+  "comparable_sales_count": 15
+}
