@@ -1,0 +1,35 @@
+# Fixture-gate (plan §A7): PRs touching parser branches or the classifier MUST
+# include ≥1 new file under tests/fixtures/. Override via `fixture-exempt`
+# label + `Fixture-exempt: <reason>` line in the PR body.
+#
+# This is a lightweight diff check — it does NOT run tests. Test execution
+# remains local-only per #11 (verified-locally label is the substitute
+# CI-green signal for the auto-merge cron, per system_3 corpus
+# system_3_auto_merge_policy.md §1 path B). A diff-only gate sits outside that
+# strip: zero compute cost, zero database dependency, completes in seconds.
+
+name: Fixture Gate
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled, unlabeled, edited]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run fixture-gate check
+        env:
+          BASE_REF: origin/${{ github.event.pull_request.base.ref }}
+          HEAD_REF: ${{ github.event.pull_request.head.sha }}
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: ./scripts/check_fixture_gate.sh

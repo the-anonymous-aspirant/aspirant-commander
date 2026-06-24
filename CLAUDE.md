@@ -73,6 +73,20 @@ pytest tests/ -v
 
 Tests use SQLite in-memory and do not require PostgreSQL.
 
+### Fixture gate
+
+PRs touching a parser branch (`app/valuation_statement/parsers/*.py`) or the
+classifier (`app/valuation_statement/classifier.py`) MUST include ≥1 new file
+under `tests/fixtures/`. Enforced by `.github/workflows/fixture-gate.yml`
+(diff-only, no test execution). Override: apply the `fixture-exempt` label and
+include a `Fixture-exempt: <reason>` line in the PR body.
+
+Run locally before opening a PR:
+
+```bash
+BASE_REF=origin/main HEAD_REF=HEAD ./scripts/check_fixture_gate.sh
+```
+
 ## Key Files
 
 | File | Purpose |
