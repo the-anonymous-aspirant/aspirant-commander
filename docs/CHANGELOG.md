@@ -2,14 +2,14 @@
 
 ## [Unreleased]
 
-### Added
+### Removed
 
-- `GET /valuation-statement/about` returns a uniform JSON description of
-  every classifier `DocumentType` — the `CATEGORIES` fingerprints walked
-  on PDF page 1 plus each parser's per-slot strategy registry. Sourced
-  live from `classifier.CATEGORIES` + `parsers.*._SLOTS` /
-  `lgh_utdrag._LABEL_STEMS` so the operator-facing About surface auto-
-  reflects every parser change with no hand-maintained markdown to drift.
+- `GET /valuation-statement/about` HTTP route. The aspirant-client now
+  bundles the transparency snapshot at build time (Wordweaver pattern,
+  aspirant-client#112) by running `scripts/regen-valuation-about.sh`
+  against `transparency.registry_as_dict()`; no runtime fetch is needed
+  to render the operator-facing About disclosure. The `transparency`
+  module and its tests remain — they are the build-time source of truth.
 
 ## [1.0.0] - 2025-03-10
 

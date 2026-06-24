@@ -8,14 +8,14 @@ Confidence covered:
   * SlotExtractor priority ordering is preserved on the rendered shape.
   * lgh_utdrag's label-stem registry is translated into the uniform
     slot/strategy shape with the synthesised slots appended.
-  * The HTTP route at /valuation-statement/about returns the same data.
+
+The registry is consumed at build time by aspirant-client's
+`scripts/regen-valuation-about.sh`, which serialises `registry_as_dict()`
+into the bundled About snapshot (Wordweaver pattern; no runtime API).
 """
 
 from __future__ import annotations
 
-from fastapi.testclient import TestClient
-
-from app.main import app
 from app.valuation_statement.classifier import DocumentType
 from app.valuation_statement.parsers import bostadsratt, smahus
 from app.valuation_statement.transparency import (
@@ -132,11 +132,3 @@ def test_registry_as_dict_is_json_serialisable_and_shape_stable():
             assert set(s.keys()) == {"slot_key", "note", "strategies"}
             for st in s["strategies"]:
                 assert set(st.keys()) == {"name", "confidence"}
-
-
-def test_about_route_returns_registry():
-    with TestClient(app) as client:
-        resp = client.get("/valuation-statement/about")
-    assert resp.status_code == 200
-    payload = resp.json()
-    assert payload == registry_as_dict()
