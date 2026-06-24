@@ -1,4 +1,7 @@
-from pydantic import BaseModel, Field
+from datetime import datetime
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ExtractedFieldOut(BaseModel):
@@ -84,3 +87,51 @@ class GenerateRequest(BaseModel):
 
 
 ExtractResponse.model_rebuild()
+
+
+# ---------- processed-valuations store ----------
+
+
+class ProcessedValuationCreate(BaseModel):
+    """Body for POST /valuation-statement/processed.
+
+    Caller sends the extract output (`extracted_values`) and the values
+    actually committed for the docx (`final_values`); divergence sets
+    `was_manually_edited`. `name` is auto-filled from
+    `<created_date>_<fastighetsbeteckning or objekt_short>` when omitted.
+    """
+
+    name: str | None = None
+    input_files: list[str] = Field(default_factory=list)
+    extracted_values: dict = Field(default_factory=dict)
+    final_values: dict = Field(default_factory=dict)
+    created_by: str | None = None
+
+
+class ProcessedValuationUpdate(BaseModel):
+    """PATCH body — every field optional, only present fields are applied."""
+
+    name: str | None = None
+    extracted_values: dict | None = None
+    final_values: dict | None = None
+
+
+class ProcessedValuationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    name: str
+    input_files: list[str]
+    extracted_values: dict
+    final_values: dict
+    was_manually_edited: bool
+    created_by: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ProcessedValuationListOut(BaseModel):
+    items: list[ProcessedValuationOut]
+    total: int
+    limit: int
+    offset: int

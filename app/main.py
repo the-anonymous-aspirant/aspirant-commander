@@ -8,6 +8,7 @@ from app.config import COMMANDER_VERSION, SERVICE_NAME, TRANSCRIBER_POLL_INTERVA
 from app.database import Base, SessionLocal, engine
 from app.poller import poll_transcriptions
 from app import routes
+from app.valuation_statement import processed as valuation_processed
 from app.valuation_statement import routes as valuation_routes
 
 logging.basicConfig(
@@ -76,3 +77,4 @@ app = FastAPI(
 
 app.include_router(routes.router)
 app.include_router(valuation_routes.router)
+app.include_router(valuation_processed.router)
