@@ -780,23 +780,23 @@ def _fix_lgh_ligatures(text: str | None) -> str | None:
 _SOURCE_CLASS_SLOT = Slot(
     key="source_class",
     description=(
-        "Which template date slot this PDF feeds: datavardering, "
-        "lagenhetsforteckning, or fastighetsutdrag."
+        "Avgör vilken datumrad i mallen den här PDF:en fyller "
+        "(datavärdering, lägenhetsförteckning eller fastighetsutdrag)."
     ),
     strategies=(
         Strategy(
             "datavardering_fingerprint",
-            "VÄRDEUTLÅTANDE/Värderingsobjekt prose markers OR UC banner → 'datavardering'",
+            "Fastighetsbyrån prosa-utlåtande (VÄRDEUTLÅTANDE / Värderingsobjekt) eller UC-tabellrapport",
             _source_class_datavardering,
         ),
         Strategy(
             "lagenhetsforteckning_fingerprint",
-            "Lägenhetsuppgi*ter + Bostadsrä*tsförening signals → 'lagenhetsforteckning'",
+            "HSB lägenhetsförteckning (Lägenhetsuppgifter + Bostadsrättsförening i texten)",
             _source_class_lagenhetsforteckning,
         ),
         Strategy(
             "fastighetsutdrag_fingerprint",
-            "'Fastighetsrapport Plus R' banner → 'fastighetsutdrag'",
+            "Lantmäteriet Fastighetsrapport (rubrik 'Fastighetsrapport Plus R')",
             _source_class_fastighetsutdrag,
         ),
     ),
@@ -806,28 +806,28 @@ _SOURCE_CLASS_SLOT = Slot(
 _PROPERTY_SHAPE_SLOT = Slot(
     key="property_shape",
     description=(
-        "Hint for the docx template's BR-vs-Friköpt mode toggle: "
-        "bostadsratt or fastighet."
+        "Avgör om mallen ska renderas i bostadsrätts- eller "
+        "fastighetsläge."
     ),
     strategies=(
         Strategy(
             "prose_upplatelseform_classify",
-            "prose Upplåtelseform bullet → 'bostadsratt' if 'Bostadsrätt' else 'fastighet'",
+            "Fastighetsbyrån prosa: 'Upplåtelseform:'-raden avgör bostadsrätt eller fastighet",
             _shape_from_prose_upplatelseform,
         ),
         Strategy(
             "uc_banner_classify",
-            "UC banner 'Bostadsrätt' → 'bostadsratt'; UC banner 'Småhus' → 'fastighet'",
+            "UC-rapportens rubrik: 'Bostadsrätt' eller 'Småhus' avgör",
             _shape_from_uc_banner,
         ),
         Strategy(
             "lgh_implies_bostadsratt",
-            "HSB lägenhetsförteckning present → 'bostadsratt'",
+            "HSB lägenhetsförteckning ⇒ bostadsrätt",
             _shape_from_lgh,
         ),
         Strategy(
             "fastighetsrapport_implies_fastighet",
-            "Lantmäteriet Fastighetsrapport present → 'fastighet'",
+            "Lantmäteriets fastighetsrapport ⇒ fastighet",
             _shape_from_fastighetsrapport,
         ),
     ),
@@ -836,31 +836,31 @@ _PROPERTY_SHAPE_SLOT = Slot(
 
 _OBJEKT_SLOT = Slot(
     key="objekt",
-    description="Full property identifier as printed on the docx Objekt row.",
+    description="Fastighetsbeteckning eller lägenhetsbeteckning som den skrivs på mallens 'Objekt'-rad.",
     strategies=(
         Strategy(
             "prose_objekt_bullet",
-            "Fastighetsbyrån prose: 'Objekt:' bullet line, verbatim",
+            "Fastighetsbyrån prosa: 'Objekt:'-raden, ordagrant",
             _objekt_prose_bullet,
         ),
         Strategy(
             "uc_br_assemble_from_cells",
-            "UC BR tabular: assemble 'LGH <n> <förening> (<orgnr>)' from Adress + Föreningsinformation + Organisationsnummer cells",
+            "UC bostadsrätt: 'LGH <nr> <förening> (<orgnr>)' satt ihop av Adress, Föreningsinformation och Organisationsnummer",
             _objekt_uc_br_assembled,
         ),
         Strategy(
             "uc_smahus_fastighetsbeteckning",
-            "UC Småhus tabular: row below 'Fastighetsbeteckning', expanded from CamelCase concat",
+            "UC småhus: cellen under 'Fastighetsbeteckning'",
             _objekt_uc_smahus_fastighetsbeteckning,
         ),
         Strategy(
             "fastighetsrapport_beteckning",
-            "Lantmäteriet Fastighetsrapport: row below 'Beteckning', uppercase fastighet block titlecased",
+            "Lantmäteriets fastighetsrapport: raden under 'Beteckning'",
             _objekt_fastighetsrapport_beteckning,
         ),
         Strategy(
             "lgh_assemble_from_cells",
-            "HSB lägenhetsförteckning: assemble 'LGH <skatteverket-nr> <förening> (<orgnr>)'",
+            "HSB lägenhetsförteckning: 'LGH <skatteverket-nr> <förening> (<orgnr>)' satt ihop av lägenhets- och föreningsuppgifter",
             _objekt_lgh_assembled,
         ),
     ),
@@ -869,11 +869,11 @@ _OBJEKT_SLOT = Slot(
 
 _OBJEKT_SHORT_SLOT = Slot(
     key="objekt_short",
-    description="Property identifier without the parenthetical orgnr; used in running text.",
+    description="Beteckning utan organisationsnummer i parentes — används i löptext.",
     strategies=(
         Strategy(
             "derived_strip_orgnr_parens",
-            "Re-run the objekt chain and strip a trailing '(<digits>)' parenthetical",
+            "Samma som 'Objekt' men utan organisationsnummer i parentes",
             _objekt_short_strip_orgnr,
         ),
     ),
@@ -882,26 +882,26 @@ _OBJEKT_SHORT_SLOT = Slot(
 
 _ADRESS_SLOT = Slot(
     key="adress",
-    description="Street + house number for the docx Adress line.",
+    description="Gata och husnummer för mallens 'Adress'-rad.",
     strategies=(
         Strategy(
             "prose_adress_bullet",
-            "Fastighetsbyrån prose: 'Adress:' bullet line",
+            "Fastighetsbyrån prosa: 'Adress:'-raden",
             _adress_prose_bullet,
         ),
         Strategy(
             "uc_label_adress_below",
-            "UC tabular: row below 'Adress' label, expanded from CamelCase, LGH suffix stripped",
+            "UC-tabell: cellen under rubriken 'Adress'",
             _adress_uc_below_label,
         ),
         Strategy(
             "fastighetsrapport_adress_line",
-            "Lantmäteriet Fastighetsrapport: street prefix of the line under 'Adress' (before postnr)",
+            "Lantmäteriets fastighetsrapport: gatuadressen på raden under 'Adress' (före postnr)",
             _adress_fastighetsrapport,
         ),
         Strategy(
             "lgh_adress_label_value",
-            "HSB lägenhetsförteckning: value of the 'Adress' label row",
+            "HSB lägenhetsförteckning: värdet på 'Adress'-raden",
             _adress_lgh,
         ),
     ),
@@ -910,31 +910,31 @@ _ADRESS_SLOT = Slot(
 
 _KOMMUN_SLOT = Slot(
     key="kommun",
-    description="Postort / locality for the docx Kommun line.",
+    description="Postort för mallens 'Kommun'-rad.",
     strategies=(
         Strategy(
             "prose_kommun_bullet",
-            "Fastighetsbyrån prose: 'Kommun:' bullet line",
+            "Fastighetsbyrån prosa: 'Kommun:'-raden",
             _kommun_prose_bullet,
         ),
         Strategy(
             "uc_label_kommun_below",
-            "UC tabular: row below 'Kommun' label",
+            "UC-tabell: cellen under rubriken 'Kommun'",
             _kommun_uc_below_label,
         ),
         Strategy(
             "uc_postort_below_address",
-            "UC tabular: postort token on the row two-below 'Adress' (fallback for missing Kommun cell)",
+            "UC-tabell: postorten två rader under 'Adress' (om Kommun-cellen saknas)",
             _kommun_uc_postort_from_addr,
         ),
         Strategy(
             "fastighetsrapport_locality_from_addr",
-            "Lantmäteriet Fastighetsrapport: locality after postnr on the line under 'Adress'",
+            "Lantmäteriets fastighetsrapport: postorten efter postnr på raden under 'Adress'",
             _kommun_fastighetsrapport,
         ),
         Strategy(
             "lgh_postort_from_address_followup",
-            "HSB lägenhetsförteckning: postort split from the line after 'Adress', titlecased",
+            "HSB lägenhetsförteckning: postorten på raden efter 'Adress'",
             _kommun_lgh,
         ),
     ),
@@ -943,31 +943,31 @@ _KOMMUN_SLOT = Slot(
 
 _UPPLATELSEFORM_SLOT = Slot(
     key="upplatelseform",
-    description="Bostadsrätt / Friköpt / Tomträtt — drives the BR-vs-fastighet mode toggle.",
+    description="Bostadsrätt, Friköpt eller Tomträtt — styr om mallen renderas i BR- eller fastighetsläge.",
     strategies=(
         Strategy(
             "prose_upplatelseform_bullet",
-            "Fastighetsbyrån prose: 'Upplåtelseform:' bullet value",
+            "Fastighetsbyrån prosa: värdet på 'Upplåtelseform:'-raden",
             _upplatelseform_prose_bullet,
         ),
         Strategy(
             "uc_br_banner_bostadsratt",
-            "UC banner 'Värdeutlåtande / Bostadsrätt' → 'Bostadsrätt'",
+            "UC-rapportens rubrik 'Värdeutlåtande / Bostadsrätt' ⇒ Bostadsrätt",
             _upplatelseform_uc_br_banner,
         ),
         Strategy(
             "uc_smahus_banner_frikopt",
-            "UC banner 'Värdeutlåtande / Småhus' → 'Friköpt' (Småhus implies Friköpt)",
+            "UC-rapportens rubrik 'Värdeutlåtande / Småhus' ⇒ Friköpt",
             _upplatelseform_uc_smahus_implies_frikopt,
         ),
         Strategy(
             "fastighetsrapport_frikopt",
-            "Lantmäteriet Fastighetsrapport → 'Friköpt' (Lagfart-owned fastighet)",
+            "Lantmäteriets fastighetsrapport ⇒ Friköpt (lagfartsägd fastighet)",
             _upplatelseform_fastighetsrapport_implies_frikopt,
         ),
         Strategy(
             "lgh_bostadsratt",
-            "HSB lägenhetsförteckning → 'Bostadsrätt' (BR-only document class)",
+            "HSB lägenhetsförteckning ⇒ Bostadsrätt",
             _upplatelseform_lgh_implies_br,
         ),
     ),
@@ -976,16 +976,16 @@ _UPPLATELSEFORM_SLOT = Slot(
 
 _MARKNADSVARDE_SLOT = Slot(
     key="marknadsvarde_kr",
-    description="Machine-suggested marknadsvärde; Swedish space-grouped thousands.",
+    description="Bedömt marknadsvärde i kronor (förslag till granskning).",
     strategies=(
         Strategy(
             "uc_label_marknadsvarde_below",
-            "UC tabular: row below 'Marknadsvärde' label, regrouped to Swedish thousands",
+            "UC-tabell: cellen under rubriken 'Marknadsvärde'",
             _marknadsvarde_uc_below_label,
         ),
         Strategy(
             "prose_bedoms_till_x_kr",
-            "Fastighetsbyrån prose: 'Marknadsvärdet bedöms till X kr' regex amount",
+            "Fastighetsbyrån prosa: beloppet i meningen 'Marknadsvärdet bedöms till X kr'",
             _marknadsvarde_prose_bedoms_till,
         ),
     ),
@@ -994,16 +994,16 @@ _MARKNADSVARDE_SLOT = Slot(
 
 _INTERVALL_SLOT = Slot(
     key="intervall_kr",
-    description="Uncertainty interval (uppåt) printed as 'intervall om ± X kr'.",
+    description="Osäkerhetsintervall i kronor — det belopp som mallens 'intervall om ± X kr' visar.",
     strategies=(
         Strategy(
             "uc_label_osakerhet_uppat_below",
-            "UC tabular: row below 'Osäkerhetuppåt' label",
+            "UC-tabell: cellen under rubriken 'Osäkerhet uppåt'",
             _intervall_uc_uppat,
         ),
         Strategy(
             "prose_symmetric_interval",
-            "Fastighetsbyrån prose: 'intervall om ± X kr' regex (uppåt = nedåt = X)",
+            "Fastighetsbyrån prosa: beloppet i meningen 'intervall om ± X kr' (symmetriskt uppåt/nedåt)",
             _intervall_prose_symmetric,
         ),
     ),
@@ -1013,33 +1013,33 @@ _INTERVALL_SLOT = Slot(
 _DOCUMENT_DATE_SLOT = Slot(
     key="document_date",
     description=(
-        "Date this PDF was issued; routes to the matching template "
-        "date slot via source_class."
+        "Datumet då PDF:en utfärdades — fyller motsvarande datumrad i "
+        "mallen beroende på underlagstyp."
     ),
     strategies=(
         Strategy(
             "uc_footer_iso_timestamp",
-            "UC footer: YYYY-MM-DD prefix of HH:MM timestamp on page 1",
+            "UC-rapport: datumet i tidsstämpeln (YYYY-MM-DD HH:MM) i sidfoten på sida 1",
             _document_date_uc_footer,
         ),
         Strategy(
             "prose_dd_m_yyyy_stamp",
-            "Fastighetsbyrån prose: dd/m/yyyy stamp above 'Utfärdat av'",
+            "Fastighetsbyrån prosa: datumstämpeln ovanför 'Utfärdat av'",
             _document_date_prose_dd_m_yyyy,
         ),
         Strategy(
             "lgh_utskriftsdatum_header",
-            "HSB lägenhetsförteckning: 'Utskri*tsdatum: YYYY-MM-DD' header (ligature-tolerant)",
+            "HSB lägenhetsförteckning: 'Utskriftsdatum: YYYY-MM-DD' i sidhuvudet",
             _document_date_lgh_utskriftsdatum,
         ),
         Strategy(
             "fastighetsrapport_aktualitetsdatum",
-            "Lantmäteriet Fastighetsrapport: row below 'Aktualitetsdatum inskrivning' label",
+            "Lantmäteriets fastighetsrapport: raden under 'Aktualitetsdatum inskrivning'",
             _document_date_fastighetsrapport,
         ),
         Strategy(
             "fastighetsrapport_footer_timestamp",
-            "Lantmäteriet Fastighetsrapport: 'YYYY-MM-DD HH:MM' generation stamp at page-1 footer",
+            "Lantmäteriets fastighetsrapport: tidsstämpeln (YYYY-MM-DD HH:MM) i sidfoten på sida 1",
             _document_date_fastighetsrapport_footer,
         ),
     ),
