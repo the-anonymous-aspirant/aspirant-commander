@@ -6,6 +6,7 @@ from fastapi import FastAPI
 
 from app.config import COMMANDER_VERSION, SERVICE_NAME, TRANSCRIBER_POLL_INTERVAL
 from app.database import Base, SessionLocal, engine
+from app.db_migrate import ensure_owner_user_id_column
 from app.poller import poll_transcriptions
 from app import routes
 from app.valuation_statement import processed as valuation_processed
@@ -48,6 +49,9 @@ async def lifespan(app: FastAPI):
     try:
         logger.info("Creating database tables...")
         Base.metadata.create_all(bind=engine)
+        # create_all never ALTERs an existing table, so a new column on a table
+        # that already holds rows needs an explicit idempotent migration (#3125).
+        ensure_owner_user_id_column(engine)
         logger.info("Database tables ready.")
 
         _polling_task = asyncio.create_task(_background_polling_loop())
