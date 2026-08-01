@@ -139,6 +139,14 @@ class ProcessedValuation(Base):
     was_manually_edited: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
     )
+    # The authenticated caller who owns this iteration. Every read/write scopes
+    # on it so one Trusted user cannot see or mutate another's valuations
+    # (system_3 #3096 / #3125). Populated from the `X-Aspirant-User-Id` header
+    # the aspirant-server proxy sets from the verified session (#3124). NOT NULL:
+    # a row with no owner would be readable by everyone, which is the bug.
+    owner_user_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Legacy free-text attribution kept for display/back-compat; NOT an
+    # authorisation column (nullable, client-supplied) — owner_user_id is.
     created_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -158,4 +166,6 @@ class ProcessedValuation(Base):
             "created_at",
             postgresql_ops={"created_at": "DESC"},
         ),
+        # Every list/get/update/delete/export filters on owner_user_id.
+        Index("ix_processed_valuations_owner_user_id", "owner_user_id"),
     )

@@ -22,7 +22,7 @@ import json
 from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
@@ -40,6 +40,23 @@ router = APIRouter(
     prefix="/valuation-statement/processed",
     tags=["valuation-statement"],
 )
+
+
+def require_caller_id(
+    x_aspirant_user_id: int | None = Header(default=None, alias="X-Aspirant-User-Id"),
+) -> int:
+    """The authenticated caller id, from the header the aspirant-server proxy sets.
+
+    Fail closed: these routes carry per-user data, so a request without a caller
+    identity is rejected (401) rather than served against the whole table. The
+    proxy (system_3 #3124) sets `X-Aspirant-User-Id` from the verified session
+    and strips any client-supplied value, so this header is trustworthy here; a
+    missing one means a misconfiguration (proxy not yet deployed) and must fail
+    closed, never revert to the pre-#3096 open behaviour.
+    """
+    if x_aspirant_user_id is None:
+        raise HTTPException(status_code=401, detail="Missing caller identity")
+    return x_aspirant_user_id
 
 
 def _auto_name(final_values: dict, extracted_values: dict) -> str:
@@ -88,6 +105,7 @@ def _flatten_for_csv(row: ProcessedValuation) -> dict:
 def create_processed_valuation(
     body: ProcessedValuationCreate,
     db: Session = Depends(get_db),
+    caller: int = Depends(require_caller_id),
 ):
     """Persist one processing iteration. Called by the client right after /generate succeeds."""
     name = body.name or _auto_name(body.final_values, body.extracted_values)
@@ -97,6 +115,7 @@ def create_processed_valuation(
         extracted_values=body.extracted_values,
         final_values=body.final_values,
         was_manually_edited=body.final_values != body.extracted_values,
+        owner_user_id=caller,
         created_by=body.created_by,
     )
     db.add(row)
@@ -110,12 +129,15 @@ def list_processed_valuations(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
+    caller: int = Depends(require_caller_id),
 ):
-    """List iterations, newest first. Paginated; the tab UI defaults to 50/page."""
-    total = db.query(ProcessedValuation).count()
+    """List the caller's own iterations, newest first. Paginated; UI defaults to 50/page."""
+    scoped = db.query(ProcessedValuation).filter(
+        ProcessedValuation.owner_user_id == caller
+    )
+    total = scoped.count()
     items = (
-        db.query(ProcessedValuation)
-        .order_by(ProcessedValuation.created_at.desc())
+        scoped.order_by(ProcessedValuation.created_at.desc())
         .limit(limit)
         .offset(offset)
         .all()
@@ -129,8 +151,11 @@ def list_processed_valuations(
 
 
 @router.get("/export.csv")
-def export_processed_valuations_csv(db: Session = Depends(get_db)):
-    """Bulk CSV of every iteration — full metadata + flattened values.
+def export_processed_valuations_csv(
+    db: Session = Depends(get_db),
+    caller: int = Depends(require_caller_id),
+):
+    """Bulk CSV of the caller's own iterations — full metadata + flattened values.
 
     The header row is the union of all keys across all rows so a sparse
     column (one row has 'final.balkong', another doesn't) still renders
@@ -138,6 +163,7 @@ def export_processed_valuations_csv(db: Session = Depends(get_db)):
     """
     rows = (
         db.query(ProcessedValuation)
+        .filter(ProcessedValuation.owner_user_id == caller)
         .order_by(ProcessedValuation.created_at.desc())
         .all()
     )
@@ -175,12 +201,33 @@ def export_processed_valuations_csv(db: Session = Depends(get_db)):
     )
 
 
-@router.get("/{valuation_id}", response_model=ProcessedValuationOut)
-def get_processed_valuation(valuation_id: UUID, db: Session = Depends(get_db)):
-    row = db.get(ProcessedValuation, valuation_id)
+def _get_owned(db: Session, valuation_id: UUID, caller: int) -> ProcessedValuation:
+    """Fetch a row the caller owns, else 404.
+
+    Scopes the lookup by owner as well as id and returns 404 — never 403 — for a
+    row that exists but belongs to someone else, so the endpoint does not confirm
+    that a given UUID exists to a non-owner (system_3 #3096).
+    """
+    row = (
+        db.query(ProcessedValuation)
+        .filter(
+            ProcessedValuation.id == valuation_id,
+            ProcessedValuation.owner_user_id == caller,
+        )
+        .first()
+    )
     if row is None:
         raise HTTPException(status_code=404, detail="Processed valuation not found")
     return row
+
+
+@router.get("/{valuation_id}", response_model=ProcessedValuationOut)
+def get_processed_valuation(
+    valuation_id: UUID,
+    db: Session = Depends(get_db),
+    caller: int = Depends(require_caller_id),
+):
+    return _get_owned(db, valuation_id, caller)
 
 
 @router.patch("/{valuation_id}", response_model=ProcessedValuationOut)
@@ -188,11 +235,10 @@ def update_processed_valuation(
     valuation_id: UUID,
     body: ProcessedValuationUpdate,
     db: Session = Depends(get_db),
+    caller: int = Depends(require_caller_id),
 ):
     """Edit-in-place: mutate the row; recompute was_manually_edited if values changed."""
-    row = db.get(ProcessedValuation, valuation_id)
-    if row is None:
-        raise HTTPException(status_code=404, detail="Processed valuation not found")
+    row = _get_owned(db, valuation_id, caller)
 
     if body.name is not None:
         row.name = body.name
@@ -209,10 +255,12 @@ def update_processed_valuation(
 
 
 @router.delete("/{valuation_id}", status_code=204)
-def delete_processed_valuation(valuation_id: UUID, db: Session = Depends(get_db)):
-    row = db.get(ProcessedValuation, valuation_id)
-    if row is None:
-        raise HTTPException(status_code=404, detail="Processed valuation not found")
+def delete_processed_valuation(
+    valuation_id: UUID,
+    db: Session = Depends(get_db),
+    caller: int = Depends(require_caller_id),
+):
+    row = _get_owned(db, valuation_id, caller)
     db.delete(row)
     db.commit()
     return Response(status_code=204)

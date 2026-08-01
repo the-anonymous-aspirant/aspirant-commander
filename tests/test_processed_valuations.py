@@ -184,3 +184,102 @@ class TestExportCsv:
         # exactly one line (the header), possibly with trailing newline
         assert len(text.strip().splitlines()) == 1
         assert "name" in text.split("\n", 1)[0]
+
+
+# --------------------------------------------------------------------------
+# Owner scoping + fail-closed on missing identity (system_3 #3096 / #3125)
+# --------------------------------------------------------------------------
+
+OWNER_A = 101
+OWNER_B = 202
+
+
+class TestFailClosedMissingIdentity:
+    """No caller identity => 401 on every route, never served against the table."""
+
+    def test_create_without_header_rejected(self, make_client):
+        c = make_client(None)
+        r = c.post(PROCESSED, json=_br_payload(name="x"))
+        assert r.status_code == 401
+
+    def test_list_without_header_rejected(self, make_client):
+        assert make_client(None).get(PROCESSED).status_code == 401
+
+    def test_export_without_header_rejected(self, make_client):
+        assert make_client(None).get(f"{PROCESSED}/export.csv").status_code == 401
+
+    def test_get_without_header_rejected(self, make_client):
+        # Seed a row as a real owner, then probe it with no identity.
+        owner = make_client(OWNER_A)
+        created = owner.post(PROCESSED, json=_br_payload(name="seed")).json()
+        r = make_client(None).get(f"{PROCESSED}/{created['id']}")
+        assert r.status_code == 401
+
+    def test_patch_without_header_rejected(self, make_client):
+        owner = make_client(OWNER_A)
+        created = owner.post(PROCESSED, json=_br_payload(name="seed")).json()
+        r = make_client(None).patch(f"{PROCESSED}/{created['id']}", json={"name": "z"})
+        assert r.status_code == 401
+
+    def test_delete_without_header_rejected(self, make_client):
+        owner = make_client(OWNER_A)
+        created = owner.post(PROCESSED, json=_br_payload(name="seed")).json()
+        r = make_client(None).delete(f"{PROCESSED}/{created['id']}")
+        assert r.status_code == 401
+        # …and the row is untouched.
+        assert owner.get(f"{PROCESSED}/{created['id']}").status_code == 200
+
+
+class TestOwnerScoping:
+    """A's valuations are invisible and immutable to B across every verb."""
+
+    def test_create_stamps_caller_as_owner_and_isolates_list(self, make_client):
+        a = make_client(OWNER_A)
+        b = make_client(OWNER_B)
+        a.post(PROCESSED, json=_br_payload(name="a-1"))
+        a.post(PROCESSED, json=_br_payload(name="a-2"))
+        b.post(PROCESSED, json=_br_payload(name="b-1"))
+
+        a_list = a.get(PROCESSED).json()
+        b_list = b.get(PROCESSED).json()
+        assert a_list["total"] == 2
+        assert {i["name"] for i in a_list["items"]} == {"a-1", "a-2"}
+        assert b_list["total"] == 1
+        assert {i["name"] for i in b_list["items"]} == {"b-1"}
+
+    def test_get_of_others_row_is_404(self, make_client):
+        a = make_client(OWNER_A)
+        b = make_client(OWNER_B)
+        created = a.post(PROCESSED, json=_br_payload(name="a-only")).json()
+        # Owner reads it fine…
+        assert a.get(f"{PROCESSED}/{created['id']}").status_code == 200
+        # …B gets 404 (not 403 — existence not confirmed).
+        assert b.get(f"{PROCESSED}/{created['id']}").status_code == 404
+
+    def test_patch_of_others_row_is_404_and_no_mutation(self, make_client):
+        a = make_client(OWNER_A)
+        b = make_client(OWNER_B)
+        created = a.post(PROCESSED, json=_br_payload(name="a-name")).json()
+        r = b.patch(f"{PROCESSED}/{created['id']}", json={"name": "hijacked"})
+        assert r.status_code == 404
+        # A's row is unchanged.
+        assert a.get(f"{PROCESSED}/{created['id']}").json()["name"] == "a-name"
+
+    def test_delete_of_others_row_is_404_and_no_deletion(self, make_client):
+        a = make_client(OWNER_A)
+        b = make_client(OWNER_B)
+        created = a.post(PROCESSED, json=_br_payload(name="keepme")).json()
+        assert b.delete(f"{PROCESSED}/{created['id']}").status_code == 404
+        # Still there for the owner.
+        assert a.get(f"{PROCESSED}/{created['id']}").status_code == 200
+
+    def test_export_scopes_to_caller(self, make_client):
+        a = make_client(OWNER_A)
+        b = make_client(OWNER_B)
+        a.post(PROCESSED, json=_br_payload(name="a-export"))
+        b.post(PROCESSED, json=_br_payload(name="b-export"))
+
+        rows_a = list(csv.DictReader(io.StringIO(a.get(f"{PROCESSED}/export.csv").text)))
+        rows_b = list(csv.DictReader(io.StringIO(b.get(f"{PROCESSED}/export.csv").text)))
+        assert [r["name"] for r in rows_a] == ["a-export"]
+        assert [r["name"] for r in rows_b] == ["b-export"]
