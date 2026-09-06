@@ -20,10 +20,27 @@ into the strategy library — never lets it silently land as a row of
 None values that the operator has to retype.
 
 PDFs containing personnummer / property details live outside the
-repo, so missing samples are SKIPPED per-fixture (not silenced). CI
-without the operator's sample directory will skip every fixture —
-which is loud enough to notice if the directory was supposed to be
-mounted but wasn't.
+repo, so missing samples are SKIPPED per-fixture. A box that holds no
+samples at all reports skips and stays green — CI never runs this
+suite (test execution is local-only per #11), so a hard failure there
+would be permanent and meaningless.
+
+Where the samples are
+---------------------
+This is the part that had been recorded nowhere, and its absence cost
+an epic a false acceptance claim and an operator a request for
+something already on the box (#5369). On the aspirant cell the
+reference documents live in the user file store:
+
+    VALUATION_SAMPLE_DIR=/data/aspirant/files/users/1/Värdeutlåtande \
+        python -m pytest tests/test_golden_pipeline.py
+
+With that set, all ten fixtures run. Without it every one of them
+skips — which is why `test_sample_directory_is_not_misconfigured`
+below turns the one unambiguous mistake (a directory that holds PDFs
+but backs no golden at all, i.e. the wrong directory) into a failure
+rather than ten more skips. Samples keep their download names; see
+`tests/sample_resolver.py` for how a stem is matched to a file.
 """
 
 from __future__ import annotations
@@ -35,14 +52,31 @@ from pathlib import Path
 import pytest
 
 from app.valuation_statement.extraction import extract_document
+from tests.sample_resolver import (
+    describe_attempt,
+    load_aliases,
+    resolve,
+    sample_pdfs,
+)
 
 
 GOLDEN_DIR = Path(__file__).parent / "fixtures" / "golden"
-SAMPLE_DIR = Path(os.environ.get("VALUATION_SAMPLE_DIR", "/tmp/vardeutlatande"))
+DEFAULT_SAMPLE_DIR = Path("/tmp/vardeutlatande")
+SAMPLE_DIR = Path(os.environ.get("VALUATION_SAMPLE_DIR") or DEFAULT_SAMPLE_DIR)
+SAMPLE_DIR_IS_EXPLICIT = bool(os.environ.get("VALUATION_SAMPLE_DIR"))
+ALIASES = load_aliases(GOLDEN_DIR)
 
 
 def _golden_files() -> list[Path]:
     return sorted(GOLDEN_DIR.glob("*.expected.json"))
+
+
+def _stem(golden_path: Path) -> str:
+    return golden_path.name.replace(".expected.json", "")
+
+
+def _sample_for(golden_path: Path) -> Path | None:
+    return resolve(_stem(golden_path), SAMPLE_DIR, ALIASES)
 
 
 @pytest.mark.parametrize(
@@ -52,11 +86,12 @@ def _golden_files() -> list[Path]:
 )
 def test_extract_matches_golden(golden_path: Path):
     golden = json.loads(golden_path.read_text(encoding="utf-8"))
-    pdf_name = golden_path.name.replace(".expected.json", ".pdf")
-    pdf_path = SAMPLE_DIR / pdf_name
-    if not pdf_path.exists():
-        pytest.skip(f"Sample PDF not present: {pdf_path}")
+    stem = _stem(golden_path)
+    pdf_path = _sample_for(golden_path)
+    if pdf_path is None:
+        pytest.skip(describe_attempt(stem, SAMPLE_DIR, ALIASES))
 
+    pdf_name = pdf_path.name
     pdf_bytes = pdf_path.read_bytes()
     result = extract_document(pdf_bytes, pdf_name)
     actual_fields = {f.key: f.value for f in result.fields}
@@ -112,4 +147,49 @@ def test_golden_covers_every_documented_sample_layout():
         f"Sample layouts without a golden fixture: {sorted(missing)}. "
         f"Drop the PDF into the sample directory and author its "
         f"`.expected.json` so the chain regressions are caught."
+    )
+
+
+def test_explicit_sample_dir_exists():
+    """`VALUATION_SAMPLE_DIR` pointing nowhere is a mistake, not a skip.
+
+    Somebody who sets the variable is asking for the real-document
+    arm to run. Silently skipping ten fixtures because the path has a
+    typo hands them a green suite that measured nothing.
+    """
+    if not SAMPLE_DIR_IS_EXPLICIT:
+        pytest.skip("VALUATION_SAMPLE_DIR not set; using the default location")
+    assert SAMPLE_DIR.is_dir(), (
+        f"VALUATION_SAMPLE_DIR={SAMPLE_DIR} is not a directory. Unset it to "
+        f"fall back to {DEFAULT_SAMPLE_DIR}, or point it at the sample store "
+        f"(on the aspirant cell: /data/aspirant/files/users/1/Värdeutlåtande)."
+    )
+
+
+def test_sample_directory_is_not_misconfigured():
+    """A directory full of PDFs that backs no golden is the wrong directory.
+
+    This is the one case that cannot be innocent. No samples at all is
+    ordinary — most checkouts have none, and every fixture skips. But
+    PDFs present and *not one* of them answering to a golden stem means
+    the harness is pointed somewhere it should not be, or the download
+    names have drifted past what `sample_resolver` recognises. Either
+    way the real-document arm is not running, and before #5369 that
+    said `10 skipped` and nothing else.
+    """
+    present = sample_pdfs(SAMPLE_DIR)
+    if not present:
+        pytest.skip(f"No sample PDFs in {SAMPLE_DIR}; real-document arm not run")
+
+    resolved = {
+        _stem(g): _sample_for(g) for g in _golden_files()
+    }
+    matched = {stem: p for stem, p in resolved.items() if p is not None}
+    assert matched, (
+        f"{SAMPLE_DIR} holds {len(present)} PDF(s) but none of them backs any "
+        f"of the {len(resolved)} golden fixtures. Files found: "
+        f"{[p.name for p in present[:12]]}. Expected stems: "
+        f"{sorted(resolved)}. Either this is the wrong directory, or a "
+        f"download name has drifted — add its prefix to "
+        f"tests/fixtures/golden/sample_index.json."
     )
