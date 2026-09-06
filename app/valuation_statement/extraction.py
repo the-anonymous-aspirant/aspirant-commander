@@ -23,11 +23,52 @@ class ExtractedField:
     note: str | None = None
 
 
+# The two slots that carry semantics rather than a value the operator would
+# otherwise type. A document where only these fired still hands the review
+# step a blank form, so they do not count toward "something was extracted".
+SEMANTIC_PRIMITIVE_KEYS = frozenset({"source_class", "property_shape"})
+
+OUTCOME_EXTRACTED = "extracted"
+OUTCOME_RECOGNISED_NO_FIELDS = "recognised_no_fields"
+OUTCOME_UNRECOGNISED = "unrecognised"
+
+
+@dataclass
+class ExtractionDiagnostics:
+    """What the extractor saw, with no document content in it.
+
+    These are real client valuation documents, so nothing here carries text
+    from the PDF: a content hash to correlate a report with an upload, the
+    per-guard predicate outcomes, and size metrics. That is enough to tell
+    the two failure branches apart without retaining a page of someone's
+    property details (#5359 item 5).
+
+    `outcome` is the discrimination the incident turned on:
+      * `extracted`             — at least one value slot filled.
+      * `recognised_no_fields`  — a content guard matched and every value
+                                  slot still missed: a strategy bug.
+      * `unrecognised`          — no guard matched at all: a layout the
+                                  strategy library does not cover.
+    """
+
+    outcome: str
+    content_sha256: str
+    byte_length: int
+    page_count: int
+    page1_text_length: int
+    full_text_length: int
+    guards_matched: list[str]
+    guards_evaluated: dict[str, bool]
+    value_fields_filled: int
+    value_fields_total: int
+
+
 @dataclass
 class ExtractionResult:
     filename: str
     fields: list[ExtractedField] = field(default_factory=list)
     extras: dict = field(default_factory=dict)
+    diagnostics: ExtractionDiagnostics | None = None
 
 
 def extract_document(pdf_bytes: bytes, filename: str) -> ExtractionResult:

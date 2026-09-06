@@ -23,13 +23,22 @@ review — never a broken default.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass
 from io import BytesIO
 from typing import Callable
 
 from app.valuation_statement._context import ParseContext, build_context
-from app.valuation_statement.extraction import ExtractedField, ExtractionResult
+from app.valuation_statement.extraction import (
+    OUTCOME_EXTRACTED,
+    OUTCOME_RECOGNISED_NO_FIELDS,
+    OUTCOME_UNRECOGNISED,
+    SEMANTIC_PRIMITIVE_KEYS,
+    ExtractedField,
+    ExtractionDiagnostics,
+    ExtractionResult,
+)
 
 
 # ---------- strategy / slot dataclasses ----------
@@ -128,6 +137,35 @@ def _is_lgh_utdrag(ctx: ParseContext) -> bool:
 def _is_fastighetsrapport(ctx: ParseContext) -> bool:
     """Lantmäteriet Fastighetsrapport Plus R."""
     return bool(re.search(r"Fastighetsrapport\s+Plus\s+R", ctx.page1_text))
+
+
+# Every content fingerprint in one place, so a diagnostic report of "which
+# guards matched" cannot drift from the guards the slots actually consult.
+# Adding a layout means adding its guard here as well as to its strategies —
+# a guard missing from this tuple is invisible to the #5359 signal.
+CONTENT_GUARDS: tuple[tuple[str, Callable[[ParseContext], bool]], ...] = (
+    ("datavardering_prose", _is_datavardering_prose),
+    ("datavardering_uc_br", _is_datavardering_uc_br),
+    ("datavardering_uc_smahus", _is_datavardering_uc_smahus),
+    ("lgh_utdrag", _is_lgh_utdrag),
+    ("fastighetsrapport", _is_fastighetsrapport),
+)
+
+
+def evaluate_content_guards(ctx: ParseContext) -> dict[str, bool]:
+    """Run every content fingerprint and report what matched.
+
+    A guard that raises is recorded as False rather than taking the request
+    down with it: this runs for diagnostics, and a broken fingerprint must
+    not turn a partial extraction into a 500.
+    """
+    outcomes: dict[str, bool] = {}
+    for name, guard in CONTENT_GUARDS:
+        try:
+            outcomes[name] = bool(guard(ctx))
+        except Exception:  # pragma: no cover - defensive; guards are pure regex
+            outcomes[name] = False
+    return outcomes
 
 
 # ---------- generic helpers ----------
@@ -1070,7 +1108,43 @@ def extract_fields(pdf_bytes: bytes, filename: str) -> ExtractionResult:
         result.fields.append(slot.run(ctx, filename))
     if _needs_comparable_sales(ctx) and ctx.page_count > 1:
         result.extras["comparable_sales"] = _extract_comparable_sales_p2(pdf_bytes)
+    result.diagnostics = _build_diagnostics(ctx, pdf_bytes, result)
     return result
+
+
+def _build_diagnostics(
+    ctx: ParseContext, pdf_bytes: bytes, result: ExtractionResult
+) -> ExtractionDiagnostics:
+    """Classify the run so a total miss is distinguishable from a good one.
+
+    Zero extracted fields with HTTP 200 was indistinguishable from a working
+    upload until someone read the database (#5359); this is the record that
+    tells them apart, and it deliberately holds no document text.
+    """
+    guards = evaluate_content_guards(ctx)
+    matched = [name for name, hit in guards.items() if hit]
+    value_fields = [f for f in result.fields if f.key not in SEMANTIC_PRIMITIVE_KEYS]
+    filled = [f for f in value_fields if f.confidence != "not_found"]
+
+    if filled:
+        outcome = OUTCOME_EXTRACTED
+    elif matched:
+        outcome = OUTCOME_RECOGNISED_NO_FIELDS
+    else:
+        outcome = OUTCOME_UNRECOGNISED
+
+    return ExtractionDiagnostics(
+        outcome=outcome,
+        content_sha256=hashlib.sha256(pdf_bytes).hexdigest(),
+        byte_length=len(pdf_bytes),
+        page_count=ctx.page_count,
+        page1_text_length=len(ctx.page1_text),
+        full_text_length=len(ctx.full_text),
+        guards_matched=matched,
+        guards_evaluated=guards,
+        value_fields_filled=len(filled),
+        value_fields_total=len(value_fields),
+    )
 
 
 def _needs_comparable_sales(ctx: ParseContext) -> bool:

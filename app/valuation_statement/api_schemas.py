@@ -31,16 +31,41 @@ class ComparableSale(BaseModel):
     raw: str | None = None
 
 
+class ExtractionDiagnosticsOut(BaseModel):
+    """Why a document produced what it produced — no document content.
+
+    Carries a content hash, the per-guard predicate outcomes and size
+    metrics: enough to tell an uncovered layout from a broken strategy
+    without retaining a page of someone's property details (#5359).
+    """
+    outcome: str
+    content_sha256: str
+    byte_length: int
+    page_count: int
+    page1_text_length: int
+    full_text_length: int
+    guards_matched: list[str] = Field(default_factory=list)
+    guards_evaluated: dict[str, bool] = Field(default_factory=dict)
+    value_fields_filled: int
+    value_fields_total: int
+
+
 class ExtractionResultOut(BaseModel):
     """Per-PDF result.
 
     `document_type` is no longer surfaced; `source_class` and
     `property_shape` ride in `fields` and the frontend reads them from
     there to route each PDF into the right docx slots.
+
+    `outcome` is stated rather than left to be inferred from counting
+    empty values: the review step has to be able to say "nothing was
+    recognised in this file" without re-deriving it (#5359).
     """
     filename: str
     fields: list[ExtractedFieldOut]
     comparable_sales: list[ComparableSale] = Field(default_factory=list)
+    outcome: str = "extracted"
+    diagnostics: ExtractionDiagnosticsOut | None = None
 
 
 class ExtractResponse(BaseModel):

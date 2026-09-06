@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 from dataclasses import asdict
@@ -9,12 +10,13 @@ from fastapi.responses import Response
 from app.valuation_statement.api_schemas import (
     ComparableSale,
     ExtractedFieldOut,
+    ExtractionDiagnosticsOut,
     ExtractResponse,
     ExtractionResultOut,
     GenerateRequest,
     OperatorDefaults,
 )
-from app.valuation_statement.extraction import extract_document
+from app.valuation_statement.extraction import OUTCOME_EXTRACTED, extract_document
 from app.valuation_statement.pdf_export import (
     LibreOfficeConversionFailed,
     LibreOfficeUnavailable,
@@ -28,6 +30,38 @@ router = APIRouter(prefix="/valuation-statement", tags=["valuation-statement"])
 
 
 MAX_PDF_BYTES = 25 * 1024 * 1024  # 25 MB per file
+
+
+def _log_extraction_outcome(filename: str, diagnostics) -> None:
+    """Say it out loud when a document yielded nothing.
+
+    Both #5359 uploads returned 200 with an empty field set and nobody knew
+    until the database was read two days later. An extraction that
+    recognises nothing is not a normal outcome, so it leaves a WARNING
+    naming the file, the hash, and which guards evaluated True — no
+    document text, since these are real client valuations.
+    """
+    if diagnostics is None or diagnostics.outcome == OUTCOME_EXTRACTED:
+        return
+    logger.warning(
+        "valuation extraction produced no fields: %s",
+        json.dumps(
+            {
+                "filename": filename,
+                "outcome": diagnostics.outcome,
+                "content_sha256": diagnostics.content_sha256,
+                "byte_length": diagnostics.byte_length,
+                "page_count": diagnostics.page_count,
+                "page1_text_length": diagnostics.page1_text_length,
+                "full_text_length": diagnostics.full_text_length,
+                "guards_matched": diagnostics.guards_matched,
+                "guards_evaluated": diagnostics.guards_evaluated,
+                "value_fields_total": diagnostics.value_fields_total,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+    )
 
 
 @router.post("/extract", response_model=ExtractResponse)
@@ -55,6 +89,8 @@ async def extract_uploads(files: list[UploadFile] = File(...)):
             )
 
         parsed = extract_document(pdf_bytes, upload.filename or "<unnamed>")
+        diagnostics = parsed.diagnostics
+        _log_extraction_outcome(parsed.filename, diagnostics)
         results.append(
             ExtractionResultOut(
                 filename=parsed.filename,
@@ -64,6 +100,10 @@ async def extract_uploads(files: list[UploadFile] = File(...)):
                 comparable_sales=[
                     ComparableSale(**row) for row in parsed.extras.get("comparable_sales", [])
                 ],
+                outcome=diagnostics.outcome if diagnostics else OUTCOME_EXTRACTED,
+                diagnostics=(
+                    ExtractionDiagnosticsOut(**asdict(diagnostics)) if diagnostics else None
+                ),
             )
         )
 
