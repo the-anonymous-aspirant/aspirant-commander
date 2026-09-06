@@ -1,0 +1,11 @@
+{
+  "_comment": [
+    "Golden stem -> prefix(es) of the sample PDF's real download name.",
+    "Only stems whose download name cannot be derived from the stem need",
+    "an entry; every other stem defaults to matching on itself. Matching",
+    "is accent-folded and treats _ - and whitespace alike, so",
+    "'LGH_utdrag' already finds 'LGH utdrag.pdf' without an entry here.",
+    "Keys starting with _ are ignored."
+  ],
+  "Datavardering_2": ["Datavärdering (1)"]
+}
