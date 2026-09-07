@@ -99,19 +99,25 @@ def _is_datavardering_prose(ctx: ParseContext) -> bool:
 
 
 def _is_datavardering_uc_br(ctx: ParseContext) -> bool:
-    """UC Bostad data-feed report for a Bostadsrätt.
+    r"""UC Bostad data-feed report for a Bostadsrätt.
 
-    Banner reads `Värdeutlåtande / Bostadsrätt` on consecutive lines.
+    Banner reads `Värdeutlåtande / Bostadsrätt`. `\s+` rather than `\s*\n\s*`:
+    which of the two words the text projection puts on a line of its own is
+    a property of the extraction, not of the document (#5371).
     """
     return bool(
-        re.search(r"V[äa]rdeutl[åa]tande\s*\n\s*Bostadsr[äa]tt", ctx.page1_text)
+        re.search(
+            r"V[äa]rdeutl[åa]tande\s+Bostadsr[äa]tt", ctx.page1_text, re.IGNORECASE
+        )
     )
 
 
 def _is_datavardering_uc_smahus(ctx: ParseContext) -> bool:
     """UC Bostad data-feed report for a Småhus (Friköpt single-family house)."""
     return bool(
-        re.search(r"V[äa]rdeutl[åa]tande\s*\n\s*Sm[åa]hus", ctx.page1_text)
+        re.search(
+            r"V[äa]rdeutl[åa]tande\s+Sm[åa]hus", ctx.page1_text, re.IGNORECASE
+        )
     )
 
 
@@ -129,14 +135,18 @@ def _is_lgh_utdrag(ctx: ParseContext) -> bool:
     from `fitz_full_text` here, not `page1_text`.
     """
     return bool(
-        re.search(r"L[äa]genhetsuppgi.{1,3}ter", ctx.fitz_full_text)
-        and re.search(r"Bostadsr[äa].{1,3}tsf[öo]rening", ctx.fitz_full_text)
+        re.search(r"L[äa]genhetsuppgi.{1,3}ter", ctx.fitz_full_text, re.IGNORECASE)
+        and re.search(
+            r"Bostadsr[äa].{1,3}tsf[öo]rening", ctx.fitz_full_text, re.IGNORECASE
+        )
     )
 
 
 def _is_fastighetsrapport(ctx: ParseContext) -> bool:
     """Lantmäteriet Fastighetsrapport Plus R."""
-    return bool(re.search(r"Fastighetsrapport\s+Plus\s+R", ctx.page1_text))
+    return bool(
+        re.search(r"Fastighetsrapport\s+Plus\s+R", ctx.page1_text, re.IGNORECASE)
+    )
 
 
 # Every content fingerprint in one place, so a diagnostic report of "which
