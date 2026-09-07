@@ -16,9 +16,10 @@ import logging
 import fitz
 import pytest
 
-from app.valuation_statement._context import build_context
+from app.valuation_statement._context import ParseContext, build_context
 from app.valuation_statement.extraction import (
     OUTCOME_EXTRACTED,
+    OUTCOME_NO_TEXT,
     OUTCOME_RECOGNISED_NO_FIELDS,
     OUTCOME_UNRECOGNISED,
     ExtractedField,
@@ -84,6 +85,94 @@ def test_the_text_was_readable_so_the_miss_is_about_recognition():
     ctx = build_context(UNKNOWN_DOC)
     assert "Fastighetsrapport Plus" in ctx.page1_text
     assert len(ctx.page1_text) > 40
+
+
+def _scanned_pdf() -> bytes:
+    """One page, one raster image, zero text objects — a print-and-scan.
+
+    Built rather than checked in: it needs no client document, and building it
+    here is what makes the "no text" property true by construction instead of
+    true by assertion about an opaque fixture.
+    """
+    doc = fitz.open()
+    page = doc.new_page(width=595, height=842)
+    pix = fitz.Pixmap(fitz.csGRAY, fitz.IRect(0, 0, 1200, 1700), False)
+    pix.clear_with(220)
+    page.insert_image(fitz.Rect(0, 0, 595, 842), pixmap=pix)
+    return doc.tobytes()
+
+
+SCANNED_DOC = _scanned_pdf()
+
+
+def test_a_document_with_no_text_is_not_reported_as_an_uncovered_layout():
+    """A scan and an unsupported layout need opposite fixes.
+
+    `unrecognised` reads "a layout the strategy library does not cover", and
+    both the log record and the wizard's advice act on it — add a fingerprint,
+    tell the user to check the report type. Neither helps a document that
+    carries no text at all, where no fingerprint can ever fire and the remedy
+    is a different export of the same file.
+    """
+    result = extract_document(SCANNED_DOC, "scanned.pdf")
+
+    assert result.diagnostics is not None
+    assert result.diagnostics.outcome == OUTCOME_NO_TEXT
+    assert result.diagnostics.guards_matched == []
+    assert result.diagnostics.value_fields_filled == 0
+    assert result.diagnostics.page_count == 1
+
+
+def test_the_scanned_fixture_really_is_a_page_with_no_text():
+    """Positive control for the test above.
+
+    A fixture that failed to build — an empty document, a zero-page PDF —
+    would satisfy the `no_text` assertion for the wrong reason. This pins that
+    there is a page, that it carries image bytes, and that neither projection
+    reads a character out of it.
+    """
+    ctx = build_context(SCANNED_DOC)
+
+    assert ctx.page_count == 1
+    assert ctx.full_text.strip() == ""
+    assert ctx.fitz_full_text.strip() == ""
+    # It is a page with content, not an empty one: a raster image is what makes
+    # this a scan rather than a blank sheet.
+    assert len(SCANNED_DOC) > 5000
+
+
+def test_a_text_bearing_unknown_layout_is_still_unrecognised():
+    """The new arm must not swallow the old one.
+
+    If `no_text` were keyed on anything looser than "no text at all" it would
+    absorb the genuine coverage gaps this epic exists to find, and #5363 would
+    stop being visible in the record.
+    """
+    result = extract_document(UNKNOWN_DOC, "FastighetPlus_Karlskrona.pdf")
+
+    assert result.diagnostics.outcome == OUTCOME_UNRECOGNISED
+    assert result.diagnostics.full_text_length > 0
+
+
+def test_one_readable_projection_is_enough_to_rule_out_no_text():
+    """pdfplumber alone must not decide it.
+
+    The two projections disagree by design (HSB's CMap), so a document
+    pdfplumber renders as empty may still be readable by PyMuPDF — and a guard
+    reading that projection could still match. Reporting `no_text` off the
+    pdfplumber view alone would mislabel exactly those documents.
+    """
+    readable_by_fitz_only = ParseContext(
+        page1_text="",
+        page1_words=(),
+        page_texts=("",),
+        fitz_full_text="Lagenhetsuppgifter",
+    )
+    all_missed = ExtractionResult(filename="x.pdf")
+
+    diagnostics = _build_diagnostics(readable_by_fitz_only, b"%PDF-x", all_missed)
+
+    assert diagnostics.outcome == OUTCOME_UNRECOGNISED
 
 
 def test_a_covered_layout_still_extracts():
