@@ -6,7 +6,7 @@ from fastapi import FastAPI
 
 from app.config import COMMANDER_VERSION, SERVICE_NAME, TRANSCRIBER_POLL_INTERVAL
 from app.database import Base, SessionLocal, engine
-from app.db_migrate import ensure_owner_user_id_column
+from app.db_migrate import ensure_owner_user_id_column, ensure_signal_reader_role
 from app.poller import poll_transcriptions
 from app import routes
 from app.valuation_statement import processed as valuation_processed
@@ -52,6 +52,10 @@ async def lifespan(app: FastAPI):
         # create_all never ALTERs an existing table, so a new column on a table
         # that already holds rows needs an explicit idempotent migration (#3125).
         ensure_owner_user_id_column(engine)
+        # Provision the least-privilege read-only role the system_3 cell-signal
+        # reader connects as (#5539). No-op unless ASPIRANT_SIGNAL_RO_PASSWORD
+        # is wired, so this is inert on deploys that do not use the reader.
+        ensure_signal_reader_role(engine)
         logger.info("Database tables ready.")
 
         _polling_task = asyncio.create_task(_background_polling_loop())

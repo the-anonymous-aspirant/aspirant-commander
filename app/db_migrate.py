@@ -19,7 +19,11 @@ import logging
 from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
 
-from app.config import VALUATION_BACKFILL_OWNER_ID
+from app.config import (
+    SIGNAL_READER_PASSWORD,
+    SIGNAL_READER_ROLE,
+    VALUATION_BACKFILL_OWNER_ID,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -123,3 +127,64 @@ def ensure_owner_user_id_column(engine: Engine) -> None:
                 _COLUMN,
                 remaining,
             )
+
+
+def _quote_literal(value: str) -> str:
+    """Quote a string as a Postgres SQL literal (standard_conforming_strings on).
+
+    Used only for the signal-reader password, which comes from our own secret
+    store rather than user input. With ``standard_conforming_strings`` on (the
+    Postgres default) a backslash is an ordinary character, so doubling the
+    single quote is sufficient; a NUL byte cannot appear in a SQL string and
+    means a corrupt secret, so reject it rather than emit broken DDL.
+    """
+    if "\x00" in value:
+        raise ValueError("signal-reader password contains a NUL byte")
+    return "'" + value.replace("'", "''") + "'"
+
+
+def ensure_signal_reader_role(engine: Engine, password: str | None = None) -> None:
+    """Idempotently provision the least-privilege role the system_3 cell-signal
+    reader connects as (#5539; security ruling on #5542).
+
+    The role may SELECT from ``processed_valuations`` and nothing else, and is
+    never ``aspirant_admin``. Safe on every boot: it creates the role if absent,
+    syncs its password to the configured secret (rotation-safe), and re-applies
+    the idempotent grants.
+
+    When no password is configured this is a NO-OP with a warning — a deploy
+    that has not wired ``ASPIRANT_SIGNAL_RO_PASSWORD`` gets no role at all
+    rather than one with a default/guessable credential.
+
+    DDL that embeds the password literal is sent via ``exec_driver_sql`` so
+    SQLAlchemy does not treat a ``:`` in the password as a bind parameter; the
+    role name is a fixed identifier and the password literal is escaped by
+    :func:`_quote_literal`.
+    """
+    pw = password if password is not None else SIGNAL_READER_PASSWORD
+    if not pw:
+        logger.warning(
+            "Signal-reader role %s not provisioned: ASPIRANT_SIGNAL_RO_PASSWORD "
+            "is unset. Set it from the secret store and reboot to create the "
+            "least-privilege reader for the cell-signal loop (#5539).",
+            SIGNAL_READER_ROLE,
+        )
+        return
+
+    role = SIGNAL_READER_ROLE  # fixed identifier, never user input
+    pw_lit = _quote_literal(pw)
+    with engine.begin() as conn:
+        dbname = conn.execute(text("SELECT current_database()")).scalar_one()
+        exists = conn.execute(
+            text("SELECT 1 FROM pg_roles WHERE rolname = :r"), {"r": role}
+        ).scalar()
+        if not exists:
+            logger.info("Provisioning least-privilege signal-reader role %s.", role)
+            conn.exec_driver_sql(f"CREATE ROLE {role} LOGIN")
+        # Sync the password to the configured secret on every boot so a rotation
+        # in the secret store takes effect without a manual ALTER.
+        conn.exec_driver_sql(f"ALTER ROLE {role} WITH LOGIN PASSWORD {pw_lit}")
+        # Least privilege: connect + read exactly one table. GRANT is idempotent.
+        conn.exec_driver_sql(f'GRANT CONNECT ON DATABASE "{dbname}" TO {role}')
+        conn.exec_driver_sql(f"GRANT USAGE ON SCHEMA public TO {role}")
+        conn.exec_driver_sql(f"GRANT SELECT ON {_TABLE} TO {role}")
