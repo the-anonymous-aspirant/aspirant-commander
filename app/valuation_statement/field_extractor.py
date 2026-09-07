@@ -183,9 +183,19 @@ def evaluate_content_guards(ctx: ParseContext) -> dict[str, bool]:
 
 
 def _bullet_value(text: str, label: str) -> str | None:
-    """Match `Label: value` (optionally bulleted with `●`) on a single line."""
+    """Match `Label: value` (optionally bulleted with `●`) on a single line.
+
+    The whitespace between the colon and the value is `[ \t]*`, NOT `\\s*`:
+    `\\s` matches a newline, so on a bullet the valuer left blank
+    (`● Adress:` with nothing after it) the old pattern crossed the line
+    break and captured the *next* bullet's label as the value — a Karlskrona
+    prose appraisal filled `adress` with `● Kommun:` and `kommun` with
+    `● Upplåtelseform: Friköpt` (#5363). An empty bullet must land as
+    `not_found` so the operator types it, never silently steal the row
+    below into a document a valuer signs.
+    """
     pat = re.compile(
-        rf"(?:^|\n)\s*(?:●\s*)?{re.escape(label)}\s*:\s*(?P<value>[^\n]+)"
+        rf"(?:^|\n)\s*(?:●\s*)?{re.escape(label)}\s*:[ \t]*(?P<value>[^\n]+)"
     )
     m = pat.search(text)
     if not m:
