@@ -32,6 +32,7 @@ from typing import Callable
 from app.valuation_statement._context import ParseContext, build_context
 from app.valuation_statement.extraction import (
     OUTCOME_EXTRACTED,
+    OUTCOME_NO_TEXT,
     OUTCOME_RECOGNISED_NO_FIELDS,
     OUTCOME_UNRECOGNISED,
     SEMANTIC_PRIMITIVE_KEYS,
@@ -1122,6 +1123,24 @@ def extract_fields(pdf_bytes: bytes, filename: str) -> ExtractionResult:
     return result
 
 
+def _carries_text(ctx: ParseContext) -> bool:
+    """Did either projection read a single non-whitespace character?
+
+    Both are consulted, not one. The two disagree by design — pdfplumber
+    quadruples letters on HSB's CMap where PyMuPDF reads cleanly, and the
+    reverse holds elsewhere — so an empty pdfplumber rendering is not on its
+    own evidence that the document has no text, and a guard reading the other
+    projection could still match. Only when neither yields anything is there
+    nothing for any fingerprint to fire on.
+
+    The test is strict emptiness rather than a length threshold: a threshold
+    would need a number nothing here can justify, and a scan carrying a stamped
+    page number is still a scan we would rather report as `unrecognised` than
+    mis-report as blank.
+    """
+    return bool(ctx.full_text.strip() or ctx.fitz_full_text.strip())
+
+
 def _build_diagnostics(
     ctx: ParseContext, pdf_bytes: bytes, result: ExtractionResult
 ) -> ExtractionDiagnostics:
@@ -1140,6 +1159,8 @@ def _build_diagnostics(
         outcome = OUTCOME_EXTRACTED
     elif matched:
         outcome = OUTCOME_RECOGNISED_NO_FIELDS
+    elif not _carries_text(ctx):
+        outcome = OUTCOME_NO_TEXT
     else:
         outcome = OUTCOME_UNRECOGNISED
 

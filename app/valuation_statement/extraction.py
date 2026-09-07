@@ -31,6 +31,7 @@ SEMANTIC_PRIMITIVE_KEYS = frozenset({"source_class", "property_shape"})
 OUTCOME_EXTRACTED = "extracted"
 OUTCOME_RECOGNISED_NO_FIELDS = "recognised_no_fields"
 OUTCOME_UNRECOGNISED = "unrecognised"
+OUTCOME_NO_TEXT = "no_text"
 
 
 @dataclass
@@ -47,8 +48,14 @@ class ExtractionDiagnostics:
       * `extracted`             — at least one value slot filled.
       * `recognised_no_fields`  — a content guard matched and every value
                                   slot still missed: a strategy bug.
-      * `unrecognised`          — no guard matched at all: a layout the
-                                  strategy library does not cover.
+      * `unrecognised`          — no guard matched at all, on a document
+                                  that did carry text: a layout the strategy
+                                  library does not cover.
+      * `no_text`               — neither text projection yielded a single
+                                  non-whitespace character. A scan or a
+                                  photograph; no fingerprint can ever match
+                                  it, so it is not a coverage gap and adding
+                                  a strategy would not help.
     """
 
     outcome: str
