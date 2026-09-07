@@ -1,0 +1,16 @@
+{
+  "_description": "Fastighetsbyrån prose appraisal — Friköpt (Karlskrona Inglatorp 1:46). The valuer left the Adress and Kommun bullets blank; both must land as not_found (null), never steal the following bullet's label line. Regression for the empty-bullet newline-swallow bug (#5363).",
+  "fields": {
+    "objekt": "Karlskrona Inglatorp 1:46",
+    "objekt_short": "Karlskrona Inglatorp 1:46",
+    "adress": null,
+    "kommun": null,
+    "upplatelseform": "Friköpt",
+    "marknadsvarde_kr": "2 300 000",
+    "intervall_kr": "25 000",
+    "document_date": "2026-09-06",
+    "source_class": "datavardering",
+    "property_shape": "fastighet"
+  },
+  "comparable_sales_count": 0
+}

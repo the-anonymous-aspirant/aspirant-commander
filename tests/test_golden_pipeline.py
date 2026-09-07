@@ -134,6 +134,7 @@ def test_golden_covers_every_documented_sample_layout():
         "Datavardering_2",          # UC BR tabular (6-col, post-2026)
         "VardeutlatandeBR",         # Fastighetsbyrån prose BR
         "VardeutlatandeHok",        # Fastighetsbyrån prose Friköpt
+        "VardeutlatandeKarlskrona", # Fastighetsbyrån prose Friköpt, Adress/Kommun bullets blank
         "UCB_Bengtsfors",           # UC Småhus tabular, address missing
         "UCB_Katrineholm",          # UC Småhus tabular, address present
         "FastighetPlusR_Bengtsfors",   # Lantmäteriet fastighetsrapport
