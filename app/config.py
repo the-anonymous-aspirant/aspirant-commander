@@ -24,5 +24,16 @@ TRANSCRIBER_POLL_INTERVAL = int(
 _backfill = os.environ.get("VALUATION_BACKFILL_OWNER_ID")
 VALUATION_BACKFILL_OWNER_ID = int(_backfill) if _backfill else None
 
+# Least-privilege read-only role the system_3 cell-signal reader connects as
+# (system_3 #5539; security ruling on #5542). The scheduled reader must never
+# connect as aspirant_admin — it may SELECT from processed_valuations and
+# nothing else. app/db_migrate.py::ensure_signal_reader_role provisions it
+# idempotently at startup from this secret. When the secret is unset the
+# provisioning is a NO-OP (never a default/guessable password), so a deploy
+# that has not wired the secret simply has no reader role rather than a weak
+# one. The system_3 cron's ASPIRANT_DB_DSN must carry this same password.
+SIGNAL_READER_ROLE = "aspirant_signal_ro"
+SIGNAL_READER_PASSWORD = os.environ.get("ASPIRANT_SIGNAL_RO_PASSWORD") or None
+
 COMMANDER_VERSION = "1.0.0"
 SERVICE_NAME = "commander"
