@@ -33,6 +33,7 @@ from app.valuation_statement._context import ParseContext, build_context
 from app.valuation_statement.extraction import (
     OUTCOME_EXTRACTED,
     OUTCOME_NO_TEXT,
+    OUTCOME_PARTIAL,
     OUTCOME_RECOGNISED_NO_FIELDS,
     OUTCOME_UNRECOGNISED,
     SEMANTIC_PRIMITIVE_KEYS,
@@ -1119,6 +1120,48 @@ SLOTS: tuple[Slot, ...] = (
 )
 
 
+# The value slots a well-formed document of a given `property_shape` is expected
+# to fill. A recognised document that fills some slots but misses one of these
+# is a *partial* extraction (#5662): silent today because filling any one slot
+# reads as success, yet the operator still retypes the missed slot by hand.
+#
+# The set is the corpus-validated core — the four value slots present in EVERY
+# one of the 11 golden fixtures, across both shapes and every source_class
+# (`objekt`, `objekt_short`, `upplatelseform`, `document_date`). It deliberately
+# EXCLUDES the four document-type-dependent slots, because requiring them would
+# fire on legitimately-handled documents and "a warning that fires on every
+# document is the same as no warning" (#5662):
+#   * `marknadsvarde_kr` / `intervall_kr` — carried by valuation reports, absent
+#     from registry documents (lägenhetsförteckning, fastighetsutdrag: e.g.
+#     LGH_utdrag, Min_bostad, FastighetPlusR_*).
+#   * `adress` / `kommun` — absent from some UC datavärdering layouts
+#     (UCB_Bengtsfors, VardeutlatandeKarlskrona) that carry the value on a
+#     different row the template does not source.
+# Whether a document type legitimately carries the optional slots is a per-type
+# fact the golden corpus is too thin (one fixture each) to encode reliably, so
+# encoding it here would assert an expectation the evidence does not support.
+# When it does, extend a shape's set below.
+_CORE_EXPECTED_SLOTS = frozenset(
+    {"objekt", "objekt_short", "upplatelseform", "document_date"}
+)
+EXPECTED_SLOTS_BY_SHAPE: dict[str, frozenset[str]] = {
+    "bostadsratt": _CORE_EXPECTED_SLOTS,
+    "fastighet": _CORE_EXPECTED_SLOTS,
+}
+
+
+def _expected_slots_for_shape(shape: str | None) -> frozenset[str]:
+    """The slots a document of `shape` must fill to count as complete.
+
+    An unknown or unclassified shape falls back to the core set, which every
+    golden fixture fills regardless of shape — so the signal still fires on a
+    document that fills a value slot yet misses `objekt`, without asserting a
+    per-shape expectation the classifier could not confirm.
+    """
+    return EXPECTED_SLOTS_BY_SHAPE.get(shape or "", _CORE_EXPECTED_SLOTS)
+
+
+
 # ---------- entrypoint ----------
 
 
@@ -1165,8 +1208,15 @@ def _build_diagnostics(
     value_fields = [f for f in result.fields if f.key not in SEMANTIC_PRIMITIVE_KEYS]
     filled = [f for f in value_fields if f.confidence != "not_found"]
 
+    shape = next((f.value for f in result.fields if f.key == "property_shape"), None)
+    filled_keys = {f.key for f in filled}
+    missed_expected = sorted(_expected_slots_for_shape(shape) - filled_keys)
+
     if filled:
-        outcome = OUTCOME_EXTRACTED
+        # Filling any one slot used to read as success; a recognised document
+        # that filled some slots but missed one its shape was expected to fill
+        # is a partial extraction, silent until it is its own outcome (#5662).
+        outcome = OUTCOME_PARTIAL if missed_expected else OUTCOME_EXTRACTED
     elif matched:
         outcome = OUTCOME_RECOGNISED_NO_FIELDS
     elif not _carries_text(ctx):
@@ -1185,6 +1235,9 @@ def _build_diagnostics(
         guards_evaluated=guards,
         value_fields_filled=len(filled),
         value_fields_total=len(value_fields),
+        # Only meaningful when something was extracted; a total miss is already
+        # its own outcome and listing every expected slot there would mislead.
+        missed_expected_slots=missed_expected if filled else [],
     )
 
 

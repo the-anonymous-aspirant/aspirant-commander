@@ -48,6 +48,9 @@ class ExtractionDiagnosticsOut(BaseModel):
     guards_evaluated: dict[str, bool] = Field(default_factory=dict)
     value_fields_filled: int
     value_fields_total: int
+    # Expected slot keys the document's shape did not fill (#5662). Non-empty
+    # only on a `partial` outcome; slot keys are schema identifiers, not content.
+    missed_expected_slots: list[str] = Field(default_factory=list)
 
 
 class ExtractionResultOut(BaseModel):

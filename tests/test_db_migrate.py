@@ -12,7 +12,10 @@ from __future__ import annotations
 from sqlalchemy import inspect, text
 
 import app.db_migrate as db_migrate
-from app.db_migrate import ensure_owner_user_id_column
+from app.db_migrate import (
+    ensure_missed_expected_slots_column,
+    ensure_owner_user_id_column,
+)
 from tests.conftest import engine
 
 TABLE = "processed_valuations"
@@ -91,3 +94,51 @@ def test_migration_creates_supporting_index(monkeypatch):
     ensure_owner_user_id_column(engine)
     index_names = {ix["name"] for ix in inspect(engine).get_indexes(TABLE)}
     assert "ix_processed_valuations_owner_user_id" in index_names
+
+
+DIAG_TABLE = "extraction_diagnostics"
+DIAG_COLUMN = "missed_expected_slots"
+
+_LEGACY_DIAG_INSERT = text(
+    f"INSERT INTO {DIAG_TABLE} "
+    "(id, filename, outcome, content_sha256, byte_length, page_count, "
+    " page1_text_length, full_text_length, guards_matched, guards_evaluated, "
+    " value_fields_filled, value_fields_total, created_at) "
+    "VALUES (gen_random_uuid(), 'legacy.pdf', 'partial', 'x', 1, 1, 1, 1, "
+    " '[]'::jsonb, '{}'::jsonb, 3, 8, now())"
+)
+
+
+def _diag_columns():
+    return {col["name"] for col in inspect(engine).get_columns(DIAG_TABLE)}
+
+
+def test_missed_expected_slots_column_is_added_and_backfilled():
+    """Simulate the production starting point: the table shipped in #5663
+    without the column and already holds rows. The migration must add it and
+    backfill existing rows to an empty list, not fail on the NOT NULL."""
+    with engine.begin() as conn:
+        conn.execute(
+            text(f"ALTER TABLE {DIAG_TABLE} DROP COLUMN IF EXISTS {DIAG_COLUMN}")
+        )
+        conn.execute(_LEGACY_DIAG_INSERT)
+    assert DIAG_COLUMN not in _diag_columns()
+
+    ensure_missed_expected_slots_column(engine)
+
+    assert DIAG_COLUMN in _diag_columns()
+    with engine.connect() as conn:
+        value = conn.execute(
+            text(
+                f"SELECT {DIAG_COLUMN} FROM {DIAG_TABLE} WHERE filename = 'legacy.pdf'"
+            )
+        ).scalar_one()
+    assert value == []
+
+
+def test_missed_expected_slots_migration_is_idempotent():
+    """Safe on every boot: a second run over a table that already has the
+    column is a no-op, and a fresh create_all schema needs no migration."""
+    ensure_missed_expected_slots_column(engine)
+    ensure_missed_expected_slots_column(engine)
+    assert DIAG_COLUMN in _diag_columns()

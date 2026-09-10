@@ -29,6 +29,7 @@ class ExtractedField:
 SEMANTIC_PRIMITIVE_KEYS = frozenset({"source_class", "property_shape"})
 
 OUTCOME_EXTRACTED = "extracted"
+OUTCOME_PARTIAL = "partial"
 OUTCOME_RECOGNISED_NO_FIELDS = "recognised_no_fields"
 OUTCOME_UNRECOGNISED = "unrecognised"
 OUTCOME_NO_TEXT = "no_text"
@@ -45,7 +46,15 @@ class ExtractionDiagnostics:
     property details (#5359 item 5).
 
     `outcome` is the discrimination the incident turned on:
-      * `extracted`             — at least one value slot filled.
+      * `extracted`             — every value slot the document's
+                                  `property_shape` is expected to fill did,
+                                  so the review step opens on a complete form.
+      * `partial`               — at least one value slot filled, but a slot
+                                  the shape is expected to fill missed (#5662).
+                                  The operator retypes only the missed slots,
+                                  which looks like success from HTTP 200 and
+                                  is silent unless this outcome is separated
+                                  out; `missed_expected_slots` names which.
       * `recognised_no_fields`  — a content guard matched and every value
                                   slot still missed: a strategy bug.
       * `unrecognised`          — no guard matched at all, on a document
@@ -68,6 +77,10 @@ class ExtractionDiagnostics:
     guards_evaluated: dict[str, bool]
     value_fields_filled: int
     value_fields_total: int
+    # Slot KEYS (never values) the document's shape was expected to fill and
+    # did not. Empty on a complete or a total-miss run; non-empty is what makes
+    # `partial` a partial. Keys are schema identifiers, not document content.
+    missed_expected_slots: list[str] = field(default_factory=list)
 
 
 @dataclass
