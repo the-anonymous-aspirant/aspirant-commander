@@ -20,15 +20,19 @@ from app.valuation_statement._context import ParseContext, build_context
 from app.valuation_statement.extraction import (
     OUTCOME_EXTRACTED,
     OUTCOME_NO_TEXT,
+    OUTCOME_PARTIAL,
     OUTCOME_RECOGNISED_NO_FIELDS,
     OUTCOME_UNRECOGNISED,
     ExtractedField,
+    ExtractionDiagnostics,
     ExtractionResult,
     extract_document,
 )
 from app.valuation_statement.field_extractor import (
     CONTENT_GUARDS,
+    EXPECTED_SLOTS_BY_SHAPE,
     _build_diagnostics,
+    _CORE_EXPECTED_SLOTS,
     evaluate_content_guards,
 )
 
@@ -175,13 +179,107 @@ def test_one_readable_projection_is_enough_to_rule_out_no_text():
     assert diagnostics.outcome == OUTCOME_UNRECOGNISED
 
 
-def test_a_covered_layout_still_extracts():
+def test_a_covered_layout_that_fills_only_some_expected_slots_is_partial():
+    """A recognised layout that fills part of what its shape expects is partial.
+
+    `KNOWN_DOC` is a minimal Fastighetsrapport fixture: the guard matches and a
+    value slot fills (`upplatelseform`), but the geometry-dependent `objekt`
+    and `document_date` cells are not present, so those expected slots miss.
+    Before #5662 that read as `extracted` — filling any one slot was success —
+    and the operator retyping `objekt` was invisible. It is now its own outcome
+    that names which expected slots missed, while the covered-layout guarantees
+    (a guard matched, at least one value slot filled) still hold.
+    """
     result = extract_document(KNOWN_DOC, "FastighetPlusR_Karlskrona.pdf")
 
     assert result.diagnostics is not None
-    assert result.diagnostics.outcome == OUTCOME_EXTRACTED
+    assert result.diagnostics.outcome == OUTCOME_PARTIAL
     assert "fastighetsrapport" in result.diagnostics.guards_matched
     assert result.diagnostics.value_fields_filled > 0
+    assert "objekt" in result.diagnostics.missed_expected_slots
+
+
+def test_a_document_that_fills_every_expected_slot_is_extracted_not_partial():
+    """`extracted` now means complete: every expected slot for the shape filled.
+
+    Built as a result rather than a synthetic PDF so the assertion is about the
+    outcome rule, not about reproducing a real layout's geometry. A bostadsrätt
+    that fills all four core slots (and nothing is expected beyond them) is a
+    clean success with no missed slots and no warning.
+    """
+    ctx = build_context(KNOWN_DOC)
+    complete = ExtractionResult(
+        filename="x.pdf",
+        fields=[
+            ExtractedField(key="objekt", value="LGH 2 HSB Brf Furulund (7...)", confidence="confident", source_filename="x.pdf"),
+            ExtractedField(key="objekt_short", value="LGH 2 HSB Brf Furulund", confidence="confident", source_filename="x.pdf"),
+            ExtractedField(key="upplatelseform", value="Bostadsrätt", confidence="confident", source_filename="x.pdf"),
+            ExtractedField(key="document_date", value="2026-09-08", confidence="confident", source_filename="x.pdf"),
+            ExtractedField(key="property_shape", value="bostadsratt", confidence="confident", source_filename="x.pdf"),
+        ],
+    )
+
+    diagnostics = _build_diagnostics(ctx, KNOWN_DOC, complete)
+
+    assert diagnostics.outcome == OUTCOME_EXTRACTED
+    assert diagnostics.missed_expected_slots == []
+    assert diagnostics.value_fields_filled == 4
+
+
+def test_a_recognised_document_that_misses_an_expected_slot_is_partial():
+    """The partial branch keyed off the shape's expected set, not the raw total.
+
+    A bostadsrätt that filled `adress`/`upplatelseform`/`document_date` but not
+    `objekt`/`objekt_short` is partial and names exactly those two — the shape
+    of the 2026-09-08 Furulund miss this task was filed on.
+    """
+    ctx = build_context(KNOWN_DOC)
+    partial = ExtractionResult(
+        filename="x.pdf",
+        fields=[
+            ExtractedField(key="adress", value="Furuvägen 2", confidence="confident", source_filename="x.pdf"),
+            ExtractedField(key="upplatelseform", value="Bostadsrätt", confidence="confident", source_filename="x.pdf"),
+            ExtractedField(key="document_date", value="2026-09-08", confidence="confident", source_filename="x.pdf"),
+            ExtractedField(key="objekt", value=None, confidence="not_found", source_filename="x.pdf"),
+            ExtractedField(key="objekt_short", value=None, confidence="not_found", source_filename="x.pdf"),
+            ExtractedField(key="property_shape", value="bostadsratt", confidence="confident", source_filename="x.pdf"),
+        ],
+    )
+
+    diagnostics = _build_diagnostics(ctx, KNOWN_DOC, partial)
+
+    assert diagnostics.outcome == OUTCOME_PARTIAL
+    assert diagnostics.missed_expected_slots == ["objekt", "objekt_short"]
+    assert diagnostics.value_fields_filled == 3
+
+
+def test_missing_only_a_document_type_optional_slot_is_not_partial():
+    """A warning that fires on every document is the same as no warning.
+
+    Registry documents (lägenhetsförteckning, fastighetsutdrag) legitimately
+    carry no market valuation, so a missing `marknadsvarde_kr` / `intervall_kr`
+    is not a partial miss. Only the shape's expected slots gate the outcome; the
+    optional document-type slots do not, which is what keeps the signal from
+    firing on the LGH_utdrag / FastighetPlusR class of golden documents.
+    """
+    ctx = build_context(KNOWN_DOC)
+    core_only = ExtractionResult(
+        filename="x.pdf",
+        fields=[
+            ExtractedField(key="objekt", value="Bengtsfors Närsidan 1:21", confidence="confident", source_filename="x.pdf"),
+            ExtractedField(key="objekt_short", value="Bengtsfors Närsidan 1:21", confidence="confident", source_filename="x.pdf"),
+            ExtractedField(key="upplatelseform", value="Friköpt", confidence="confident", source_filename="x.pdf"),
+            ExtractedField(key="document_date", value="2026-09-08", confidence="confident", source_filename="x.pdf"),
+            ExtractedField(key="marknadsvarde_kr", value=None, confidence="not_found", source_filename="x.pdf"),
+            ExtractedField(key="intervall_kr", value=None, confidence="not_found", source_filename="x.pdf"),
+            ExtractedField(key="property_shape", value="fastighet", confidence="confident", source_filename="x.pdf"),
+        ],
+    )
+
+    diagnostics = _build_diagnostics(ctx, KNOWN_DOC, core_only)
+
+    assert diagnostics.outcome == OUTCOME_EXTRACTED
+    assert diagnostics.missed_expected_slots == []
 
 
 def test_recognised_but_empty_is_a_third_outcome_not_folded_into_the_other_two():
@@ -272,3 +370,163 @@ def test_a_total_miss_is_logged_with_the_guard_outcomes(caplog):
     payload = json.loads(logged.split(": ", 1)[1])
     assert payload["guards_evaluated"] == {name: False for name, _ in CONTENT_GUARDS}
     assert payload["content_sha256"]
+
+
+def _partial_diagnostics(missed):
+    """A content-free `partial` diagnostic record for the log-shape tests."""
+    return ExtractionDiagnostics(
+        outcome=OUTCOME_PARTIAL,
+        content_sha256="a" * 64,
+        byte_length=4096,
+        page_count=1,
+        page1_text_length=200,
+        full_text_length=200,
+        guards_matched=["lgh_utdrag"],
+        guards_evaluated={"lgh_utdrag": True},
+        value_fields_filled=6,
+        value_fields_total=8,
+        missed_expected_slots=list(missed),
+    )
+
+
+def test_a_partial_extraction_leaves_its_own_greppable_warning(caplog):
+    """A partial miss is loud, and greppable APART from the zero-field line.
+
+    The two failures need different reading — a total miss is a coverage or
+    recognition gap, a partial miss is a slot the operator retyped on an
+    otherwise working document — so the message strings differ and the partial
+    line names which expected slots missed.
+    """
+    from app.valuation_statement.routes import _log_extraction_outcome
+
+    with caplog.at_level(logging.WARNING, logger="app.valuation_statement.routes"):
+        _log_extraction_outcome(
+            "Furulund.pdf", _partial_diagnostics(["objekt", "objekt_short"])
+        )
+
+    warnings = [
+        r
+        for r in caplog.records
+        if r.levelno == logging.WARNING and r.name == "app.valuation_statement.routes"
+    ]
+    assert len(warnings) == 1, "a partial extraction left no log line"
+    logged = warnings[0].getMessage()
+    # Distinct message string: greppable apart from the total-miss warning.
+    assert "filled only some expected slots" in logged
+    assert "produced no fields" not in logged
+
+    payload = json.loads(logged.split(": ", 1)[1])
+    assert payload["outcome"] == OUTCOME_PARTIAL
+    assert payload["missed_expected_slots"] == ["objekt", "objekt_short"]
+    assert payload["value_fields_filled"] == 6
+    assert payload["value_fields_total"] == 8
+
+
+def test_a_complete_extraction_leaves_no_warning(caplog):
+    """The other half of the signal: a document that filled everything expected
+    is silent — otherwise the warning is noise on every upload."""
+    from app.valuation_statement.routes import _log_extraction_outcome
+
+    diagnostics = _partial_diagnostics([])
+    object.__setattr__(diagnostics, "outcome", OUTCOME_EXTRACTED)
+
+    with caplog.at_level(logging.WARNING, logger="app.valuation_statement.routes"):
+        _log_extraction_outcome("complete.pdf", diagnostics)
+
+    warnings = [
+        r
+        for r in caplog.records
+        if r.levelno == logging.WARNING and r.name == "app.valuation_statement.routes"
+    ]
+    assert warnings == []
+
+
+def test_the_partial_warning_carries_no_document_content(caplog):
+    """Slot KEYS are schema identifiers, but the record must still hold no text.
+
+    The partial line names the missed slots by key; it must not carry a value
+    the operator would have typed. This pins that only keys/counts/hash reach
+    the log — the same no-content rule as the total-miss line (#5359 item 5).
+    """
+    from app.valuation_statement.routes import _log_extraction_outcome
+
+    with caplog.at_level(logging.WARNING, logger="app.valuation_statement.routes"):
+        _log_extraction_outcome(
+            "Furulund.pdf", _partial_diagnostics(["objekt", "marknadsvarde_kr"])
+        )
+
+    logged = caplog.records[-1].getMessage()
+    payload = json.loads(logged.split(": ", 1)[1])
+    # Only these keys — no value/text field can ride along.
+    assert set(payload) == {
+        "filename",
+        "outcome",
+        "content_sha256",
+        "missed_expected_slots",
+        "value_fields_filled",
+        "value_fields_total",
+        "guards_matched",
+    }
+
+
+def test_the_expected_slot_set_is_filled_by_every_golden_fixture():
+    """The expected set must be a subset of what real handled documents fill.
+
+    This is the guard on the design decision itself: if a slot is ever added to
+    EXPECTED_SLOTS_BY_SHAPE that some legitimately-handled document does not
+    carry, the partial warning starts firing on that document and becomes noise.
+    Pinning it against the golden corpus makes that regression a red test rather
+    than a silent flood of warnings in production.
+    """
+    import glob
+    import os
+
+    golden = glob.glob(
+        os.path.join(os.path.dirname(__file__), "fixtures", "golden", "*.expected.json")
+    )
+    assert golden, "no golden fixtures found — the corpus check would be vacuous"
+
+    checked = 0
+    for path in golden:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        fields = data.get("fields", data)
+        if not isinstance(fields, dict) or "property_shape" not in fields:
+            continue
+        shape = fields["property_shape"]
+        if isinstance(shape, dict):
+            shape = shape.get("value")
+        expected = EXPECTED_SLOTS_BY_SHAPE.get(shape, frozenset())
+        for slot in expected:
+            value = fields.get(slot)
+            if isinstance(value, dict):
+                value = value.get("value")
+            assert value, (
+                f"{os.path.basename(path)} ({shape}): expected slot {slot!r} is "
+                f"not filled in the golden output — it must not be in the "
+                f"expected set, or the partial warning will fire on it"
+            )
+        checked += 1
+    assert checked, "no shape-bearing golden fixture exercised the expected set"
+
+
+def test_an_unknown_shape_falls_back_to_the_core_expected_set():
+    """A document whose shape the classifier missed still gets the core check.
+
+    The fallback is the core set every golden fixture fills regardless of shape,
+    so a run that filled a value slot yet missed `objekt` is still caught even
+    when `property_shape` did not classify.
+    """
+    ctx = build_context(KNOWN_DOC)
+    result = ExtractionResult(
+        filename="x.pdf",
+        fields=[
+            ExtractedField(key="adress", value="Furuvägen 2", confidence="confident", source_filename="x.pdf"),
+            ExtractedField(key="objekt", value=None, confidence="not_found", source_filename="x.pdf"),
+        ],
+    )
+
+    diagnostics = _build_diagnostics(ctx, KNOWN_DOC, result)
+
+    assert diagnostics.outcome == OUTCOME_PARTIAL
+    assert set(diagnostics.missed_expected_slots) == set(_CORE_EXPECTED_SLOTS) - {"adress"}
