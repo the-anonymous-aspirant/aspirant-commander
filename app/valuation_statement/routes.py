@@ -2,10 +2,14 @@ import json
 import logging
 import os
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
+from sqlalchemy.orm import Session
+
+from app.database import get_db
+from app.models import ExtractionDiagnostic
 
 from app.valuation_statement.api_schemas import (
     ComparableSale,
@@ -30,6 +34,15 @@ router = APIRouter(prefix="/valuation-statement", tags=["valuation-statement"])
 
 
 MAX_PDF_BYTES = 25 * 1024 * 1024  # 25 MB per file
+
+# How long a persisted extraction diagnostic is kept. These rows are exhaust,
+# not a record of value, so they expire rather than accumulate. 90 days is
+# chosen against the observed upload rate, not a guess: `processed_valuations`
+# on the live database held 12 valuations over the 10 days to 2026-09-10, i.e.
+# a few documents a day, so a 90-day window is a few hundred content-free rows
+# and cheap to keep. The window is what makes an incident diagnosable weeks
+# later — #5359 itself spanned four days between the failure and the read.
+DIAGNOSTIC_RETENTION_DAYS = 90
 
 
 def _log_extraction_outcome(filename: str, diagnostics) -> None:
@@ -64,8 +77,57 @@ def _log_extraction_outcome(filename: str, diagnostics) -> None:
     )
 
 
+def _persist_extraction_outcome(db: Session, filename: str, diagnostics) -> None:
+    """Write the diagnostic somewhere a container restart cannot erase.
+
+    The WARNING above is the live signal; this is the record. They are not
+    interchangeable: on 2026-09-10 the 09-08 extraction records were already
+    gone because the commander container had restarted on 09-09, so the one
+    surface built to be read after the fact could not be (#5663).
+
+    Every outcome is stored, not only the failures the warning fires on. A
+    partial extraction — some slots filled, some missed — is silent today
+    (#5662) and is exactly the case a later reader needs the row for; and a
+    successful row is what makes a failure legible by contrast, which is how
+    the `FastighetPlus_` / `FastighetPlusR_` discriminator was found at all.
+
+    A diagnostic is bookkeeping about the operator's work, never the work
+    itself. If this write fails the extraction still succeeded and the
+    operator must still get their fields, so the failure is logged loudly
+    and swallowed rather than turned into a 500.
+    """
+    if diagnostics is None:
+        return
+    try:
+        db.add(
+            ExtractionDiagnostic(
+                filename=filename[:255],
+                outcome=diagnostics.outcome,
+                content_sha256=diagnostics.content_sha256,
+                byte_length=diagnostics.byte_length,
+                page_count=diagnostics.page_count,
+                page1_text_length=diagnostics.page1_text_length,
+                full_text_length=diagnostics.full_text_length,
+                guards_matched=list(diagnostics.guards_matched),
+                guards_evaluated=dict(diagnostics.guards_evaluated),
+                value_fields_filled=diagnostics.value_fields_filled,
+                value_fields_total=diagnostics.value_fields_total,
+            )
+        )
+        cutoff = datetime.now(timezone.utc) - timedelta(days=DIAGNOSTIC_RETENTION_DAYS)
+        db.query(ExtractionDiagnostic).filter(
+            ExtractionDiagnostic.created_at < cutoff
+        ).delete(synchronize_session=False)
+        db.commit()
+    except Exception as exc:  # pragma: no cover - exercised via monkeypatched failure
+        db.rollback()
+        logger.exception("failed to persist extraction diagnostic for %s: %s", filename, exc)
+
+
 @router.post("/extract", response_model=ExtractResponse)
-async def extract_uploads(files: list[UploadFile] = File(...)):
+async def extract_uploads(
+    files: list[UploadFile] = File(...), db: Session = Depends(get_db)
+):
     """Parse one or more uploaded PDFs via the field-first extractor.
 
     Returns one ExtractionResultOut per uploaded file plus the persisted
@@ -91,6 +153,7 @@ async def extract_uploads(files: list[UploadFile] = File(...)):
         parsed = extract_document(pdf_bytes, upload.filename or "<unnamed>")
         diagnostics = parsed.diagnostics
         _log_extraction_outcome(parsed.filename, diagnostics)
+        _persist_extraction_outcome(db, parsed.filename, diagnostics)
         results.append(
             ExtractionResultOut(
                 filename=parsed.filename,

@@ -169,3 +169,65 @@ class ProcessedValuation(Base):
         # Every list/get/update/delete/export filters on owner_user_id.
         Index("ix_processed_valuations_owner_user_id", "owner_user_id"),
     )
+
+
+class ExtractionDiagnostic(Base):
+    """What the extractor saw on one uploaded PDF, kept past the container.
+
+    `ExtractionDiagnostics` (#5361) was built so a failed extraction says
+    what it saw. It reached `logger.warning` and stopped there, which put
+    its lifetime at the mercy of the commander container's: the 2026-09-08
+    extraction records were already unreadable on 2026-09-10 because the
+    container had restarted on 09-09 (#5663). A diagnostic whose whole
+    purpose is to be read after the fact cannot live only in stdout.
+
+    Every row here is content-free by construction, which is what makes
+    persisting it cheap and privacy-safe. The dataclass it mirrors carries
+    a content hash, per-guard predicate outcomes and size metrics — no text
+    from the PDF — and that constraint holds on the way into this table
+    (#5359 item 5). `filename` is the one client-supplied string, and it is
+    already stored in `processed_valuations.input_files`, so it is not a
+    new exposure; it is also the handle every correlation in the #5359
+    investigation actually turned on.
+
+    Rows are diagnostic exhaust, not a record of value: they expire on a
+    fixed window (`DIAGNOSTIC_RETENTION_DAYS`) swept at write time, so
+    retention is enforced by something that runs rather than by intent.
+    """
+
+    __tablename__ = "extraction_diagnostics"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    # One of extraction.OUTCOME_* — the discrimination the incident turned on.
+    outcome: Mapped[str] = mapped_column(String(32), nullable=False)
+    # sha256 of the uploaded bytes: correlates a report with an upload, and
+    # tells a re-upload of the same document apart from a different export.
+    content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    byte_length: Mapped[int] = mapped_column(Integer, nullable=False)
+    page_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    page1_text_length: Mapped[int] = mapped_column(Integer, nullable=False)
+    full_text_length: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Guard names only, never the text they matched.
+    guards_matched: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    guards_evaluated: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    value_fields_filled: Mapped[int] = mapped_column(Integer, nullable=False)
+    value_fields_total: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        # Every read is "what happened around <time>", newest first.
+        Index(
+            "ix_extraction_diagnostics_created_at",
+            "created_at",
+            postgresql_ops={"created_at": "DESC"},
+        ),
+        # The retention sweep and the re-upload correlation both filter here.
+        Index("ix_extraction_diagnostics_content_sha256", "content_sha256"),
+    )
