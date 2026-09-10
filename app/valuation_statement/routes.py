@@ -20,7 +20,11 @@ from app.valuation_statement.api_schemas import (
     GenerateRequest,
     OperatorDefaults,
 )
-from app.valuation_statement.extraction import OUTCOME_EXTRACTED, extract_document
+from app.valuation_statement.extraction import (
+    OUTCOME_EXTRACTED,
+    OUTCOME_PARTIAL,
+    extract_document,
+)
 from app.valuation_statement.pdf_export import (
     LibreOfficeConversionFailed,
     LibreOfficeUnavailable,
@@ -46,15 +50,40 @@ DIAGNOSTIC_RETENTION_DAYS = 90
 
 
 def _log_extraction_outcome(filename: str, diagnostics) -> None:
-    """Say it out loud when a document yielded nothing.
+    """Say it out loud when a document yielded nothing — or only part.
 
     Both #5359 uploads returned 200 with an empty field set and nobody knew
     until the database was read two days later. An extraction that
     recognises nothing is not a normal outcome, so it leaves a WARNING
     naming the file, the hash, and which guards evaluated True — no
     document text, since these are real client valuations.
+
+    A *partial* extraction is the same failure at smaller scale (#5662): a
+    recognised document filled some slots and missed one it was expected to,
+    the operator retypes the missed slot, and the run reads as success. It
+    leaves its OWN warning — a distinct message string so the two are
+    greppable apart — naming which expected slots missed (slot keys only, the
+    same no-document-content rule as the total-miss line).
     """
     if diagnostics is None or diagnostics.outcome == OUTCOME_EXTRACTED:
+        return
+    if diagnostics.outcome == OUTCOME_PARTIAL:
+        logger.warning(
+            "valuation extraction filled only some expected slots: %s",
+            json.dumps(
+                {
+                    "filename": filename,
+                    "outcome": diagnostics.outcome,
+                    "content_sha256": diagnostics.content_sha256,
+                    "missed_expected_slots": diagnostics.missed_expected_slots,
+                    "value_fields_filled": diagnostics.value_fields_filled,
+                    "value_fields_total": diagnostics.value_fields_total,
+                    "guards_matched": diagnostics.guards_matched,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+        )
         return
     logger.warning(
         "valuation extraction produced no fields: %s",
