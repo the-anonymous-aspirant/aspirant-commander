@@ -215,6 +215,13 @@ class ExtractionDiagnostic(Base):
     guards_evaluated: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     value_fields_filled: Mapped[int] = mapped_column(Integer, nullable=False)
     value_fields_total: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Expected slot KEYS the document's shape did not fill (#5662). Non-empty
+    # only on a `partial` outcome. Keys are schema identifiers, never document
+    # text, so the row stays content-free like the rest of the record. Lets a
+    # reader of the persisted row — the case this table exists for, after the
+    # container that logged it restarted — name which slots missed, not only
+    # count them.
+    missed_expected_slots: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

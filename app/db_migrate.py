@@ -188,3 +188,34 @@ def ensure_signal_reader_role(engine: Engine, password: str | None = None) -> No
         conn.exec_driver_sql(f'GRANT CONNECT ON DATABASE "{dbname}" TO {role}')
         conn.exec_driver_sql(f"GRANT USAGE ON SCHEMA public TO {role}")
         conn.exec_driver_sql(f"GRANT SELECT ON {_TABLE} TO {role}")
+
+
+_DIAG_TABLE = "extraction_diagnostics"
+_DIAG_COLUMN = "missed_expected_slots"
+
+
+def ensure_missed_expected_slots_column(engine: Engine) -> None:
+    """Add ``extraction_diagnostics.missed_expected_slots`` to a table predating it.
+
+    The table shipped in #5663 without this column; #5662 adds it so a persisted
+    ``partial`` row can name *which* expected slots missed, not only count them.
+    ``create_all`` never ALTERs an existing table, so a deploy that already holds
+    diagnostic rows needs an explicit add.
+
+    Idempotent and safe on every boot: ``ADD COLUMN IF NOT EXISTS`` with a
+    constant default is a metadata-only change on Postgres (no table rewrite)
+    that backfills existing rows to ``[]``. On a fresh database ``create_all``
+    already built the column NOT NULL from the model and this is a no-op.
+    """
+    inspector = inspect(engine)
+    if not inspector.has_table(_DIAG_TABLE):
+        # Fresh DB before create_all, or a deploy without the diagnostics table.
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                f"ALTER TABLE {_DIAG_TABLE} "
+                f"ADD COLUMN IF NOT EXISTS {_DIAG_COLUMN} JSONB NOT NULL "
+                f"DEFAULT '[]'::jsonb"
+            )
+        )
