@@ -108,20 +108,46 @@ the failure count, not the skip count.
 PRs touching an extraction strategy MUST include ≥1 new file under
 `tests/fixtures/`.
 
-> **The gate does not currently enforce this.** `scripts/check_fixture_gate.sh`
-> arms on `*/parsers/*` and `classifier*.py` — paths the #1113 refactor deleted
-> when it replaced the classifier-then-per-type-parser dispatch with one chain
-> per slot. No file on `main` matches either pattern, so the check passes
-> unconditionally. Tracked as system_3 #5665; until it lands, the fixture rule
-> is a convention rather than a gate. The strategies themselves now live in
-> `app/valuation_statement/extraction.py` and `field_extractor.py`. Enforced by `.github/workflows/fixture-gate.yml`
-(diff-only, no test execution). Override: apply the `fixture-exempt` label and
-include a `Fixture-exempt: <reason>` line in the PR body.
+"An extraction strategy" means one of three declared files — the gate arms on
+these and nothing else:
+
+| path | why |
+|------|-----|
+| `app/valuation_statement/field_extractor.py` | the strategy library: `CONTENT_GUARDS`, the per-slot chains, every predicate they run |
+| `app/valuation_statement/extraction.py` | the chain runner and the outcome semantics — what a miss is called |
+| `app/valuation_statement/_context.py` | the two text projections every strategy queries |
+
+`routes.py`, `api_schemas.py`, `processed.py`, `template.py`, `pdf_export.py`
+and `transparency.py` carry the extraction to the operator without deciding
+what it finds, and do not arm the gate.
+
+The list lives in `ARMING_PATHS` in `scripts/check_fixture_gate.sh`, and
+`tests/test_fixture_gate.py` asserts every entry is a real file. That assertion
+is there because the gate previously armed on `*/parsers/*` and `classifier*.py`
+— paths the #1113 refactor deleted — and passed unconditionally for months
+while reading exactly like a gate that was protecting something (system_3
+#5665). **Adding a new module that defines strategies means adding it to
+`ARMING_PATHS`**; the test catches a path that disappears, not one that was
+never listed.
+
+Enforced by `.github/workflows/fixture-gate.yml` (diff-only, no test
+execution). Override: apply the `fixture-exempt` label and include a
+`Fixture-exempt: <reason>` line in the PR body.
 
 Run locally before opening a PR:
 
 ```bash
 BASE_REF=origin/main HEAD_REF=HEAD ./scripts/check_fixture_gate.sh
+```
+
+The script also takes an explicit file list instead of a git diff, which is how
+the tests drive it (the service image carries no `git`). Both variables are
+required and the mode announces itself on stdout, so a CI run cannot enter it
+silently:
+
+```bash
+CHANGED_FILES=$'app/valuation_statement/field_extractor.py' ADDED_FILES='' \
+  ./scripts/check_fixture_gate.sh
 ```
 
 ## Key Files
