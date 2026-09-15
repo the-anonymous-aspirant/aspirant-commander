@@ -232,6 +232,10 @@ class ExtractionDiagnostic(Base):
     ocr_used: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )
+    # For an image-only row, which kind: "reprinted_vector" / "raster_scan" /
+    # "unknown"; NULL when the document carried text (#5910). Nullable, so no
+    # backfill is needed — an old row simply has no sub-kind.
+    no_text_subkind: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

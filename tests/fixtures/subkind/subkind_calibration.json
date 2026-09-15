@@ -1,0 +1,13 @@
+{
+  "_comment": "Calibration for the no_text sub-kind classifier (#5910), measured on the real #5907 files (structural counts only — content-free — via fitz get_fonts/get_drawings/get_image_rects). Satisfies the fixture gate armed by touching _ocr.py and _context.py. The classifier's thresholds live in app/valuation_statement/_ocr.py; this records what they were calibrated against.",
+  "samples": [
+    {"file": "DV.pdf", "kind": "reprinted_vector", "fonts": 0, "drawings_per_page": [1984, 1588, 895], "max_image_page_fraction": 0.01},
+    {"file": "DV1.pdf", "kind": "reprinted_vector", "fonts": 0, "drawings_per_page": [859, 1480], "max_image_page_fraction": 0.03},
+    {"file": "synthetic_scan", "kind": "raster_scan", "fonts": 0, "drawings_per_page": [0], "max_image_page_fraction": 1.0}
+  ],
+  "thresholds": {
+    "min_drawings_for_reprinted_vector": 50,
+    "full_page_image_fraction_for_raster_scan": 0.5
+  },
+  "safety": "unknown (and an absent field) means the client keeps its current copy, so a misclassification is never worse than today."
+}

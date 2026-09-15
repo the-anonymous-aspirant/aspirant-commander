@@ -70,3 +70,62 @@ def ocr_pdf_pages(
             finally:
                 image.close()
     return texts
+
+
+# --- no_text sub-kind classification (#5910) ---------------------------------
+
+SUBKIND_REPRINTED_VECTOR = "reprinted_vector"
+SUBKIND_RASTER_SCAN = "raster_scan"
+SUBKIND_UNKNOWN = "unknown"
+
+# Calibrated on the real files: a UC report re-printed through "Print To PDF"
+# carries fonts=0 with hundreds-to-thousands of vector drawings per page and
+# only tiny logo images; a true scan carries one page-filling raster with ~no
+# drawings. Both populations sit far from these thresholds.
+_SUBKIND_MIN_DRAWINGS = 50
+_SUBKIND_FULL_PAGE_IMAGE_FRAC = 0.5
+
+
+def classify_no_text_subkind(pdf_bytes: bytes) -> str:
+    """Tell a re-printed vector PDF apart from a true raster scan.
+
+    Both reach `no_text` (no text layer), but they want opposite advice: a UC
+    report re-printed through "Print To PDF" has every glyph as a vector outline
+    (``fonts == 0``, many drawings per page, only tiny logo images), and the
+    right answer is "upload the original file" — it extracts cleanly with the
+    existing guards. A photograph or scanner output is one page-filling raster
+    with almost no drawings, and OCR (or re-export) is the only route.
+
+    Returns ``reprinted_vector``, ``raster_scan``, or ``unknown`` when neither
+    signature is clear. The client treats ``unknown`` (and an absent field) as
+    "keep the current copy", so a misclassification is never worse than today
+    (#5910).
+    """
+    import fitz
+
+    total_fonts = 0
+    total_drawings = 0
+    has_full_page_image = False
+    with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
+        for page in doc:
+            total_fonts += len(page.get_fonts())
+            total_drawings += len(page.get_drawings())
+            page_area = abs(page.rect.width * page.rect.height) or 1.0
+            for img in page.get_images(full=True):
+                for rect in page.get_image_rects(img[0]):
+                    if (
+                        abs(rect.width * rect.height) / page_area
+                        >= _SUBKIND_FULL_PAGE_IMAGE_FRAC
+                    ):
+                        has_full_page_image = True
+                        break
+
+    if has_full_page_image and total_drawings < _SUBKIND_MIN_DRAWINGS:
+        return SUBKIND_RASTER_SCAN
+    if (
+        total_fonts == 0
+        and total_drawings >= _SUBKIND_MIN_DRAWINGS
+        and not has_full_page_image
+    ):
+        return SUBKIND_REPRINTED_VECTOR
+    return SUBKIND_UNKNOWN
