@@ -98,3 +98,19 @@ def test_decide_endpoint_rejects_a_non_pdf(client):
     files = [("files", ("x.txt", io.BytesIO(b"not a pdf"), "text/plain"))]
     resp = client.post("/valuation-statement/decide", files=files)
     assert resp.status_code == 415
+
+
+def test_decide_never_calls_pdfplumber(monkeypatch):
+    """The text-layer detection is fitz-only. pdfplumber's extract_text spends
+    ~18s walking a re-printed vector PDF's outlined glyphs to return zero chars,
+    which would put the "fast decision" at ~17s and defeat it (caught dogfooding
+    DV.pdf, #5915). If decide ever reaches for pdfplumber, this fails."""
+    import pdfplumber
+
+    def _boom(*_a, **_k):
+        raise AssertionError("decide_extraction must not open pdfplumber (fitz-only)")
+
+    monkeypatch.setattr(pdfplumber, "open", _boom)
+    d = decide_extraction(_raster_scan_pdf(pages=2))
+    assert d.ocr_required is True
+    assert d.no_text_subkind == "raster_scan"

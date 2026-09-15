@@ -149,27 +149,34 @@ class ExtractionDecision:
 def decide_extraction(pdf_bytes: bytes) -> ExtractionDecision:
     """Decide whether OCR is required and estimate its duration, WITHOUT OCR.
 
-    Reads the two native text projections (no OCR), classifies the image-only
-    sub-kind, and counts pages — everything the extractor knows within ~1.4s.
-    `/extract` is a single blocking POST that returns only when the ~24s OCR is
-    done; this is the same decision, made cheaply, so the client can announce
-    the image-scanning phase and estimate it instead of spinning silently
-    (#5915). The estimate is 0 and the sub-kind None when OCR is not required.
-    """
-    from io import BytesIO
+    Detects a text layer, classifies the image-only sub-kind, and counts pages —
+    everything the extractor knows within ~2s. `/extract` is a single blocking
+    POST that returns only when the ~24s OCR is done; this is the same decision,
+    made cheaply, so the client can announce the image-scanning phase and
+    estimate it instead of spinning silently (#5915). Estimate 0 / sub-kind None
+    when OCR is not required.
 
+    Text detection is fitz-only, NOT pdfplumber: on a re-printed vector PDF
+    pdfplumber's `extract_text` spends ~18s walking thousands of outlined-glyph
+    paths to return zero characters, which would put the "fast decision" at ~17s
+    and defeat the whole point (caught dogfooding DV.pdf, #5915). fitz reads the
+    same text layer in ~0.25s, and fitz-empty is a reliable OCR trigger: every
+    text-bearing PDF this pipeline sees — including HSB's lägenhetsförteckning,
+    which fitz renders as ligature-damaged but non-empty text — leaves fitz
+    non-empty, and only the two OCR cases (outlined-vector, raster scan) leave it
+    empty. If a document ever had a pdfplumber-only text layer, decide would say
+    "scanning" and `/extract` would then read it and skip OCR — a brief cosmetic
+    mismatch, never a wrong extraction.
+    """
     import fitz
-    import pdfplumber
 
     from app.valuation_statement._ocr import classify_no_text_subkind
 
-    with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
-        page_count = len(pdf.pages)
-        native = "\n".join((p.extract_text() or "") for p in pdf.pages)
     with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
+        page_count = doc.page_count
         fitz_native = "\n".join((page.get_text() or "") for page in doc)
 
-    ocr_required = not (native.strip() or fitz_native.strip())
+    ocr_required = not fitz_native.strip()
     subkind = classify_no_text_subkind(pdf_bytes) if ocr_required else None
     per_page = (
         OCR_SECONDS_PER_PAGE.get(subkind or "unknown", OCR_SECONDS_PER_PAGE["unknown"])
