@@ -100,27 +100,41 @@ def _is_datavardering_prose(ctx: ParseContext) -> bool:
     return "VÄRDEUTLÅTANDE" in ctx.page1_text and "Värderingsobjekt" in ctx.page1_text
 
 
+# On the OCR path a misread logo or stray glyphs can fall BETWEEN two adjacent
+# banner tokens (#5935: DV1's UC Småhus banner carries `\n\nOo\n` — the UC logo
+# read as "Oo" — between `Värdeutlåtande` and `Småhus`, and the `\s+` join cannot
+# span it, so the guard returned False and no strategy ran). For an OCR'd document
+# allow a bounded junk run between adjacent tokens, while still REQUIRING every
+# token in order — the two-token banner intact, not a relaxation to one token, so
+# a document that is not this layout still does not match. Gated on `ctx.ocr_used`
+# so the digital path keeps its exact `\s+` join and is byte-for-byte unchanged.
+_OCR_BANNER_GAP = r"[\s\S]{0,12}?"
+
+
+def _banner_matches(ctx: ParseContext, *token_patterns: str) -> bool:
+    joiner = _OCR_BANNER_GAP if ctx.ocr_used else r"\s+"
+    return bool(re.search(joiner.join(token_patterns), ctx.page1_text, re.IGNORECASE))
+
+
 def _is_datavardering_uc_br(ctx: ParseContext) -> bool:
     r"""UC Bostad data-feed report for a Bostadsrätt.
 
-    Banner reads `Värdeutlåtande / Bostadsrätt`. `\s+` rather than `\s*\n\s*`:
-    which of the two words the text projection puts on a line of its own is
-    a property of the extraction, not of the document (#5371).
+    Banner reads `Värdeutlåtande / Bostadsrätt`. `\s+` (digital) rather than
+    `\s*\n\s*`: which of the two words the text projection puts on a line of its
+    own is a property of the extraction, not of the document (#5371). On OCR a
+    bounded junk run between the two tokens is tolerated (#5935).
     """
-    return bool(
-        re.search(
-            r"V[äa]rdeutl[åa]tande\s+Bostadsr[äa]tt", ctx.page1_text, re.IGNORECASE
-        )
-    )
+    return _banner_matches(ctx, r"V[äa]rdeutl[åa]tande", r"Bostadsr[äa]tt")
 
 
 def _is_datavardering_uc_smahus(ctx: ParseContext) -> bool:
-    """UC Bostad data-feed report for a Småhus (Friköpt single-family house)."""
-    return bool(
-        re.search(
-            r"V[äa]rdeutl[åa]tande\s+Sm[åa]hus", ctx.page1_text, re.IGNORECASE
-        )
-    )
+    """UC Bostad data-feed report for a Småhus (Friköpt single-family house).
+
+    Both banner tokens required; on OCR a bounded junk run between them is
+    tolerated (#5935 — DV1's `Oo` logo glyphs between `Värdeutlåtande` and
+    `Småhus` defeated the old `\\s+` join and left the document at 0 fields).
+    """
+    return _banner_matches(ctx, r"V[äa]rdeutl[åa]tande", r"Sm[åa]hus")
 
 
 def _is_datavardering_uc(ctx: ParseContext) -> bool:
@@ -145,10 +159,14 @@ def _is_lgh_utdrag(ctx: ParseContext) -> bool:
 
 
 def _is_fastighetsrapport(ctx: ParseContext) -> bool:
-    """Lantmäteriet Fastighetsrapport Plus R."""
-    return bool(
-        re.search(r"Fastighetsrapport\s+Plus\s+R", ctx.page1_text, re.IGNORECASE)
-    )
+    """Lantmäteriet Fastighetsrapport Plus R.
+
+    Same two-token-banner shape and the same OCR exposure as the UC guards
+    (#5935): it survives on today's DV only by luck — its stray OCR glyph landed
+    before the banner rather than inside it — so it takes the same bounded-gap
+    tolerance on the OCR path, all three tokens still required.
+    """
+    return _banner_matches(ctx, r"Fastighetsrapport", r"Plus", r"R")
 
 
 # Every content fingerprint in one place, so a diagnostic report of "which
