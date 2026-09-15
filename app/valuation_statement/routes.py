@@ -4,7 +4,7 @@ import os
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
@@ -163,11 +163,22 @@ def _persist_extraction_outcome(db: Session, filename: str, diagnostics) -> None
         logger.exception("failed to persist extraction diagnostic for %s: %s", filename, exc)
 
 
+def optional_caller_id(
+    x_aspirant_user_id: int | None = Header(default=None, alias="X-Aspirant-User-Id"),
+) -> int | None:
+    """The caller id if the proxy set it, else None — for endpoints where the
+    per-user record is a convenience, not a boundary. `/extract` embeds the
+    caller's own defaults when known and an empty block otherwise, so it stays
+    callable without a caller (e.g. a direct or legacy call) rather than 401'ing;
+    the identity read/write endpoints use the fail-closed `require_caller_id`."""
+    return x_aspirant_user_id
+
+
 @router.post("/extract", response_model=ExtractResponse)
 async def extract_uploads(
     files: list[UploadFile] = File(...),
     db: Session = Depends(get_db),
-    caller: int = Depends(require_caller_id),
+    caller: int | None = Depends(optional_caller_id),
 ):
     """Parse one or more uploaded PDFs via the field-first extractor.
 
@@ -350,16 +361,18 @@ def _operator_defaults_path(user_id: int) -> "Path":
     return _operator_defaults_dir() / f"{user_id}.json"
 
 
-def _load_operator_defaults(user_id: int) -> OperatorDefaults:
+def _load_operator_defaults(user_id: int | None) -> OperatorDefaults:
     """Read one appraiser's own persisted identity defaults.
 
     Keyed by the caller id (the aspirant-server proxy sets `X-Aspirant-User-Id`
     from the verified session and strips any client value, #3096). When the user
-    has never saved, returns the EMPTY default — not another user's identity and
-    not a hardcoded name.
+    has never saved — or is unknown — returns the EMPTY default, never another
+    user's identity and never a hardcoded name.
     """
     import json
 
+    if user_id is None:
+        return _EMPTY_DEFAULTS.model_copy()
     path = _operator_defaults_path(user_id)
     if not path.exists():
         return _EMPTY_DEFAULTS.model_copy()
