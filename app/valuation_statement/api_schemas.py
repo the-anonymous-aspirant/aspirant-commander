@@ -172,3 +172,20 @@ class ProcessedValuationListOut(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class DecideResult(BaseModel):
+    """Per-file pre-flight decision (#5915)."""
+    filename: str
+    ocr_required: bool
+    no_text_subkind: str | None = None
+    page_count: int
+    estimated_ocr_seconds: int
+
+
+class DecideResponse(BaseModel):
+    """Fast pre-flight for a batch, so the client can announce OCR before the
+    blocking /extract (#5915)."""
+    documents: list[DecideResult]
+    any_ocr_required: bool
+    estimated_seconds: int

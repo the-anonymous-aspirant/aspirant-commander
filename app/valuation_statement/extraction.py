@@ -123,3 +123,62 @@ def extract_document(pdf_bytes: bytes, filename: str) -> ExtractionResult:
     from app.valuation_statement.field_extractor import extract_fields
 
     return extract_fields(pdf_bytes, filename)
+
+
+# Per-page OCR wall-time by sub-kind, seconds (#5915). A starting point measured
+# at the served endpoint: reprinted_vector ~8s/page (rendering outlined glyphs
+# is the expensive half), raster_scan ~4s/page; unknown takes the conservative
+# middle. These are re-measurable constants, not a budget — revise here.
+OCR_SECONDS_PER_PAGE = {
+    "reprinted_vector": 8,
+    "raster_scan": 4,
+    "unknown": 6,
+}
+
+
+@dataclass
+class ExtractionDecision:
+    """The cheap half of extraction, surfaced before OCR runs (#5915)."""
+
+    ocr_required: bool
+    no_text_subkind: str | None
+    page_count: int
+    estimated_ocr_seconds: int
+
+
+def decide_extraction(pdf_bytes: bytes) -> ExtractionDecision:
+    """Decide whether OCR is required and estimate its duration, WITHOUT OCR.
+
+    Reads the two native text projections (no OCR), classifies the image-only
+    sub-kind, and counts pages — everything the extractor knows within ~1.4s.
+    `/extract` is a single blocking POST that returns only when the ~24s OCR is
+    done; this is the same decision, made cheaply, so the client can announce
+    the image-scanning phase and estimate it instead of spinning silently
+    (#5915). The estimate is 0 and the sub-kind None when OCR is not required.
+    """
+    from io import BytesIO
+
+    import fitz
+    import pdfplumber
+
+    from app.valuation_statement._ocr import classify_no_text_subkind
+
+    with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
+        page_count = len(pdf.pages)
+        native = "\n".join((p.extract_text() or "") for p in pdf.pages)
+    with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
+        fitz_native = "\n".join((page.get_text() or "") for page in doc)
+
+    ocr_required = not (native.strip() or fitz_native.strip())
+    subkind = classify_no_text_subkind(pdf_bytes) if ocr_required else None
+    per_page = (
+        OCR_SECONDS_PER_PAGE.get(subkind or "unknown", OCR_SECONDS_PER_PAGE["unknown"])
+        if ocr_required
+        else 0
+    )
+    return ExtractionDecision(
+        ocr_required=ocr_required,
+        no_text_subkind=subkind,
+        page_count=page_count,
+        estimated_ocr_seconds=per_page * page_count,
+    )

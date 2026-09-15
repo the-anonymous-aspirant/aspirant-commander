@@ -1,0 +1,4 @@
+{
+  "_comment": "OCR-time estimate constants for /decide (#5915). Seconds per page by no_text sub-kind. Starting point measured at the served endpoint (manager, 13:2xZ): DV.pdf reprinted_vector 3pp=23.8s (~7.9/pp, twice identical), DV1 reprinted_vector 2pp=17.0s (~8.5/pp), Aspstigen raster_scan 4pp=15.6s (~3.9/pp). The vector kind costs ~2x per page (rendering outlined glyphs). Re-measurable, not a budget — the source of truth is OCR_SECONDS_PER_PAGE in app/valuation_statement/extraction.py.",
+  "seconds_per_page": { "reprinted_vector": 8, "raster_scan": 4, "unknown": 6 }
+}
