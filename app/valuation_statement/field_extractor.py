@@ -473,6 +473,46 @@ def _titlecase_upper_alpha(token: str) -> str:
     return token
 
 
+# A registry fastighet designation: a capitalised place/name block ending in the
+# `<blocknr>:<unitnr>` pair every beteckning carries, e.g. `Bengtsfors NÄRSIDAN
+# 1:21`. Used only for the OCR fallback below, where the columnar layout the
+# positional read relies on is gone.
+_FASTIGHET_DESIGNATION_RE = re.compile(
+    r"[A-ZÅÄÖ][\wÅÄÖåäö]*(?:\s+[A-ZÅÄÖ0-9][\wÅÄÖåäö]*){0,3}\s+\d+:\d+"
+)
+
+
+def _objekt_fastighetsrapport_beteckning_ocr(ctx: ParseContext) -> str | None:
+    """OCR fallback for the Fastighetsrapport `objekt` slot (#5909).
+
+    `_objekt_fastighetsrapport_beteckning` reads the cell *below* the
+    `Beteckning` column header — a spatial read. OCR linearises the page, so
+    "the cell below" no longer exists and an OCR'd fastighetsrapport loses
+    `objekt` even though the label and the value both survived the scan. This
+    variant is gated on `ctx.ocr_used`, so the digital path is untouched and the
+    positional strategy above still wins there; it fires only when native text
+    was empty. The header is a 3-cell row `Beteckning / Senaste ändring allmänna
+    delen / Totalareal`, which OCR linearises as the three headers then the
+    values; the beteckning is the first value, so anchoring on the LAST header
+    (`Totalareal`) puts the designation immediately after it and keeps the header
+    words out of the match — anchoring on `Beteckning` swept `Totalareal` into the
+    value. It takes the single designation in the short window after the anchor,
+    requiring exactly one so a noisy scan with a stray `n:nn` elsewhere yields
+    nothing rather than a wrong beteckning. OCR-recovered values are surfaced as
+    `uncertain` for review by `_mark_ocr_confidence`.
+    """
+    if not (ctx.ocr_used and _is_fastighetsrapport(ctx)):
+        return None
+    anchor = re.search(r"totalareal", ctx.fitz_full_text, re.IGNORECASE)
+    if not anchor:
+        return None
+    window = ctx.fitz_full_text[anchor.end(): anchor.end() + 120]
+    hits = _FASTIGHET_DESIGNATION_RE.findall(window)
+    if len(hits) != 1:
+        return None
+    return " ".join(_titlecase_upper_alpha(tok) for tok in hits[0].split())
+
+
 def _objekt_lgh_assembled(ctx: ParseContext) -> str | None:
     """Assemble `LGH N FÖRENING (orgnr)` from an HSB lägenhetsförteckning."""
     if not _is_lgh_utdrag(ctx):
@@ -917,6 +957,11 @@ _OBJEKT_SLOT = Slot(
             "fastighetsrapport_beteckning",
             "Lantmäteriets fastighetsrapport: raden under 'Beteckning'",
             _objekt_fastighetsrapport_beteckning,
+        ),
+        Strategy(
+            "fastighetsrapport_beteckning_ocr",
+            "Lantmäteriets fastighetsrapport (OCR): beteckningen efter 'Beteckning' i linjär text",
+            _objekt_fastighetsrapport_beteckning_ocr,
         ),
         Strategy(
             "lgh_assemble_from_cells",
