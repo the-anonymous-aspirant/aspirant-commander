@@ -1170,10 +1170,38 @@ def extract_fields(pdf_bytes: bytes, filename: str) -> ExtractionResult:
     result = ExtractionResult(filename=filename)
     for slot in SLOTS:
         result.fields.append(slot.run(ctx, filename))
+    if ctx.ocr_used:
+        _mark_ocr_confidence(result.fields)
     if _needs_comparable_sales(ctx) and ctx.page_count > 1:
         result.extras["comparable_sales"] = _extract_comparable_sales_p2(pdf_bytes)
     result.diagnostics = _build_diagnostics(ctx, pdf_bytes, result)
     return result
+
+
+_OCR_CONFIDENCE_NOTE = (
+    "Recovered by OCR from a scanned/photographed document — verify against the original."
+)
+
+
+def _mark_ocr_confidence(fields: list[ExtractedField]) -> None:
+    """Flag every OCR-recovered value so review never treats it as confident.
+
+    OCR misreads a digit or a ligature silently, and a scanned `slutpris` off
+    by one is worse than an empty field, so a value read off a raster must not
+    reach the operator indistinguishable from one read off a text layer. Every
+    value field that fired is dropped to `uncertain` with a provenance note the
+    review UI already renders distinctly; `not_found` stays `not_found` (there
+    is nothing recovered to doubt), and the semantic primitives
+    (`source_class`/`property_shape`) are left alone — they carry classifier
+    state, not a value the operator would verify (#5907).
+    """
+    for f in fields:
+        if f.key in SEMANTIC_PRIMITIVE_KEYS or f.confidence == "not_found":
+            continue
+        f.confidence = "uncertain"
+        f.note = (
+            _OCR_CONFIDENCE_NOTE if not f.note else f"{f.note} · {_OCR_CONFIDENCE_NOTE}"
+        )
 
 
 def _carries_text(ctx: ParseContext) -> bool:
@@ -1217,6 +1245,13 @@ def _build_diagnostics(
         # that filled some slots but missed one its shape was expected to fill
         # is a partial extraction, silent until it is its own outcome (#5662).
         outcome = OUTCOME_PARTIAL if missed_expected else OUTCOME_EXTRACTED
+    elif ctx.ocr_used:
+        # OCR ran (the native projections were empty) but recovered no usable
+        # value. From the operator's side the document is still an unreadable
+        # scan, so it keeps the `no_text` outcome the client renders its scan
+        # hint on — the `ocr_used` flag on the row is what records that OCR was
+        # tried and could not help (#5907).
+        outcome = OUTCOME_NO_TEXT
     elif matched:
         outcome = OUTCOME_RECOGNISED_NO_FIELDS
     elif not _carries_text(ctx):
@@ -1238,6 +1273,7 @@ def _build_diagnostics(
         # Only meaningful when something was extracted; a total miss is already
         # its own outcome and listing every expected slot there would mislead.
         missed_expected_slots=missed_expected if filled else [],
+        ocr_used=ctx.ocr_used,
     )
 
 

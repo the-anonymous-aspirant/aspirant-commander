@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Date, DateTime, Index, Integer, String, Text
+from sqlalchemy import Boolean, Date, DateTime, Index, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -222,6 +222,16 @@ class ExtractionDiagnostic(Base):
     # container that logged it restarted — name which slots missed, not only
     # count them.
     missed_expected_slots: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    # True when this row's text projections were OCR-rebuilt from a scan (#5907).
+    # Tells a `no_text` row where OCR was tried and recovered nothing apart from
+    # one where OCR was never attempted, and marks an `extracted`/`partial` row
+    # whose values came from OCR (and are surfaced to the operator as uncertain).
+    # server_default so a fresh table from create_all matches the idempotent
+    # ADD COLUMN ... DEFAULT false migration: a raw insert (or a pre-existing
+    # row) that omits ocr_used gets false rather than tripping the NOT NULL.
+    ocr_used: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

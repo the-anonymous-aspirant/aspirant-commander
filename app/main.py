@@ -8,6 +8,7 @@ from app.config import COMMANDER_VERSION, SERVICE_NAME, TRANSCRIBER_POLL_INTERVA
 from app.database import Base, SessionLocal, engine
 from app.db_migrate import (
     ensure_missed_expected_slots_column,
+    ensure_ocr_used_column,
     ensure_owner_user_id_column,
     ensure_signal_reader_role,
 )
@@ -59,6 +60,9 @@ async def lifespan(app: FastAPI):
         # extraction_diagnostics predates missed_expected_slots (#5662 landed
         # after #5663 shipped the table); add the column on a table with rows.
         ensure_missed_expected_slots_column(engine)
+        # extraction_diagnostics also predates the OCR fallback's ocr_used flag
+        # (#5907); add it on a table with rows the same idempotent way.
+        ensure_ocr_used_column(engine)
         # Provision the least-privilege read-only role the system_3 cell-signal
         # reader connects as (#5539). No-op unless ASPIRANT_SIGNAL_RO_PASSWORD
         # is wired, so this is inert on deploys that do not use the reader.

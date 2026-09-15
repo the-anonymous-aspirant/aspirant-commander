@@ -99,6 +99,9 @@ def _log_extraction_outcome(filename: str, diagnostics) -> None:
                 "guards_matched": diagnostics.guards_matched,
                 "guards_evaluated": diagnostics.guards_evaluated,
                 "value_fields_total": diagnostics.value_fields_total,
+                # `no_text` with ocr_used=True is "OCR was tried and recovered
+                # nothing"; with ocr_used=False it was never attempted (#5907).
+                "ocr_used": diagnostics.ocr_used,
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -142,6 +145,7 @@ def _persist_extraction_outcome(db: Session, filename: str, diagnostics) -> None
                 value_fields_filled=diagnostics.value_fields_filled,
                 value_fields_total=diagnostics.value_fields_total,
                 missed_expected_slots=list(diagnostics.missed_expected_slots),
+                ocr_used=diagnostics.ocr_used,
             )
         )
         cutoff = datetime.now(timezone.utc) - timedelta(days=DIAGNOSTIC_RETENTION_DAYS)

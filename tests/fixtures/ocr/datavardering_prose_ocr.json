@@ -1,0 +1,12 @@
+{
+  "_comment": "Canned OCR output for a scanned prose Datavardering, standing in for a real scan so the OCR branch (#5907) is tested without depending on Tesseract's exact character output. Real scans are client-confidential and kept out of the repo per the golden convention (VALUATION_SAMPLE_DIR); the end-to-end Tesseract path is a separate, skippable smoke test in tests/test_ocr_fallback.py. This text is authored to trigger _is_datavardering_prose (VÄRDEUTLÅTANDE + Värderingsobjekt) and the Adress/Kommun bullet strategies.",
+  "page_texts": [
+    "VÄRDEUTLÅTANDE\nVärderingsobjekt\nAdress: Gryningsvägen 13\nKommun: Partille\n"
+  ],
+  "expect_ocr_used": true,
+  "expect_guard": "datavardering_prose",
+  "expect_fields": {
+    "adress": "Gryningsvägen 13",
+    "kommun": "Partille"
+  }
+}

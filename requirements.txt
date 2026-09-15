@@ -11,3 +11,10 @@ pdfplumber==0.11.4
 pymupdf==1.24.13
 python-docx==1.1.2
 python-multipart==0.0.20
+# OCR fallback for image-only PDFs (#5907). pytesseract drives the tesseract-ocr
+# binary installed in Dockerfile-Commander; Pillow hands it the rasterised page.
+# Pillow is already pulled transitively by pdfplumber — pinned here because the
+# OCR module imports it directly, so the dependency should be declared, not
+# incidental. Raster is via pymupdf (above); no poppler/pdf2image is needed.
+pytesseract==0.3.13
+Pillow==12.3.0

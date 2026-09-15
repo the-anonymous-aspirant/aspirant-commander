@@ -51,6 +51,10 @@ class ExtractionDiagnosticsOut(BaseModel):
     # Expected slot keys the document's shape did not fill (#5662). Non-empty
     # only on a `partial` outcome; slot keys are schema identifiers, not content.
     missed_expected_slots: list[str] = Field(default_factory=list)
+    # True when the projections were OCR-rebuilt from a scan (#5907). Values on
+    # such a run are surfaced as `uncertain`; a `no_text` row with this set had
+    # OCR tried and recovered nothing.
+    ocr_used: bool = False
 
 
 class ExtractionResultOut(BaseModel):
