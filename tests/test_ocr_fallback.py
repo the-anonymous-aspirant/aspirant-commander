@@ -33,8 +33,12 @@ from app.valuation_statement.extraction import (
     ExtractedField,
     extract_document,
 )
+from app.valuation_statement._context import ParseContext
 from app.valuation_statement.field_extractor import (
     _OCR_CONFIDENCE_NOTE,
+    _is_datavardering_uc_br,
+    _is_datavardering_uc_smahus,
+    _is_fastighetsrapport,
     _mark_ocr_confidence,
 )
 
@@ -184,6 +188,67 @@ def test_ocr_fastighetsrapport_recovers_objekt_from_linear_beteckning(monkeypatc
         assert by_key[key].value == value, f"{key} not recovered from OCR text"
         assert by_key[key].confidence == "uncertain", f"{key} not flagged uncertain"
     assert diag.outcome != OUTCOME_NO_TEXT
+
+
+_UC_SMAHUS_FIXTURE = (
+    Path(__file__).parent / "fixtures" / "ocr" / "datavardering_uc_smahus_ocr.json"
+)
+
+
+def test_ocr_uc_smahus_banner_survives_logo_junk_between_tokens(monkeypatch):
+    """A UC Småhus banner OCR'd with the UC logo misread as `Oo` between
+    `Värdeutlåtande` and `Småhus`; the old `\\s+` join could not span it, so the
+    guard returned False and the document stayed at 0 fields (#5935). The OCR-gated
+    bounded-gap tolerance recognises the banner, so its strategies run and the
+    document classifies instead of falling to `no_text`.
+    """
+    fx = json.loads(_UC_SMAHUS_FIXTURE.read_text())
+    monkeypatch.setattr(
+        _context._ocr,
+        "ocr_pdf_pages",
+        lambda *_a, **_k: list(fx["page_texts"]),
+        raising=True,
+    )
+
+    result = extract_document(_scanned_pdf(), "uc_smahus_scan.pdf")
+    diag = result.diagnostics
+    by_key = {f.key: f for f in result.fields}
+
+    assert diag.ocr_used is True
+    assert fx["expect_guard"] in diag.guards_matched
+    assert diag.outcome != OUTCOME_NO_TEXT
+    for key, value in fx["expect_fields"].items():
+        assert by_key[key].value == value, f"{key} not recovered once the banner matched"
+
+
+def _ctx(text: str, ocr_used: bool) -> ParseContext:
+    return ParseContext(
+        page1_text=text,
+        page1_words=(),
+        page_texts=(text,),
+        fitz_full_text=text,
+        ocr_used=ocr_used,
+    )
+
+
+def test_banner_guards_tolerate_junk_only_on_the_ocr_path(monkeypatch):
+    """The bounded-gap tolerance is OCR-only and keeps BOTH banner tokens (#5935):
+    a junk run between the tokens matches on the OCR path and NOT on the digital
+    path, and the second token is still required so a non-matching layout stays
+    out."""
+    # OCR path: junk between the two tokens is tolerated.
+    assert _is_datavardering_uc_smahus(_ctx("Värdeutlåtande\n\nOo\nSmåhus rapport", True))
+    assert _is_datavardering_uc_br(_ctx("Värdeutlåtande xQx Bostadsrätt", True))
+    assert _is_fastighetsrapport(_ctx("Fastighetsrapport z Plus q R", True))
+
+    # Both tokens still required — not a relaxation to the banner word alone.
+    assert not _is_datavardering_uc_smahus(_ctx("Värdeutlåtande\n\nOo\nBostadsrätt", True))
+    assert not _is_datavardering_uc_smahus(_ctx("Värdeutlåtande ensamt utan andra ordet", True))
+
+    # Digital path: the exact `\s+` join is unchanged — junk between the tokens
+    # does NOT match, and adjacent tokens do.
+    assert not _is_datavardering_uc_smahus(_ctx("Värdeutlåtande\n\nOo\nSmåhus", False))
+    assert _is_datavardering_uc_smahus(_ctx("Värdeutlåtande Småhus", False))
 
 
 def test_ocr_recovers_nothing_stays_no_text(monkeypatch):

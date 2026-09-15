@@ -1,0 +1,11 @@
+{
+  "_comment": "#5935 regression: a UC Bostad Värdeutlåtande / Småhus whose banner OCR'd with the UC logo misread as 'Oo' between the two tokens. The old '\\s+' join could not span it, so _is_datavardering_uc_smahus returned False and the document extracted 0 fields even though ocr_used was True. Synthetic — no client document or PII; the 'Oo' between the banner tokens reproduces the real damage from Datavärdering (2).pdf.",
+  "page_texts": [
+    "Värdeutlåtande\n\nOo\nSmåhus\nVärderingsdatum: 2024-06-07\nMarknadsvärde: 2 000 000 kr\nAdress: Provgatan 1"
+  ],
+  "expect_guard": "datavardering_uc_smahus",
+  "expect_fields": {
+    "property_shape": "fastighet",
+    "upplatelseform": "Friköpt"
+  }
+}
