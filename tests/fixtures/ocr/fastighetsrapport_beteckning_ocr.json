@@ -1,0 +1,12 @@
+{
+  "_comment": "#5909 regression: an OCR'd Lantmateriet Fastighetsrapport. The value strategies read positionally (the cell BELOW a column header); OCR linearises the page so the positional read finds nothing, and objekt was lost even though the beteckning survived the scan. This fixture is a SYNTHETIC fastighetsrapport (no client document or PII): the beteckning 'TESTKOMMUN PROVTRAKT 9:99' is invented, and the header row is the documented 3-cell 'Beteckning / Senaste andring allmanna delen / Totalareal'. The OCR objekt fallback anchors on the last header (Totalareal) and takes the single designation after it, so the header words stay out of the value.",
+  "page_texts": [
+    "Fastighetsrapport Plus R\nBeteckning Senaste ändring allmänna delen Totalareal\nTESTKOMMUN PROVTRAKT 9:99 2024-01-15 1 234 kvm\nAdress Provgatan 1\nKommun Testkommun",
+    "Sida 2 av 2\nUppgifterna hämtade från Lantmäteriet."
+  ],
+  "expect_guard": "fastighetsrapport",
+  "expect_fields": {
+    "objekt": "Testkommun Provtrakt 9:99",
+    "objekt_short": "Testkommun Provtrakt 9:99"
+  }
+}

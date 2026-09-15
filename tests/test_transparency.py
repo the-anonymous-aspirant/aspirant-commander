@@ -60,16 +60,20 @@ def test_registry_as_dict_is_field_first():
     assert "categories" not in data
 
 
-def test_objekt_chain_lists_all_five_source_layouts():
+def test_objekt_chain_lists_all_source_strategies():
     reg = get_transparency_registry()
     objekt = next(s for s in reg if s.key == "objekt")
     names = [st.name for st in objekt.strategies]
-    # Five strategies in priority order — prose first (highest signal),
-    # UC BR + UC Småhus + Fastighetsrapport + LGH after.
+    # Five source layouts in priority order — prose first (highest signal),
+    # UC BR + UC Småhus + Fastighetsrapport + LGH after. The fastighetsrapport
+    # carries two strategies: the digital positional read and an OCR-only linear
+    # fallback right after it (#5909), so the digital path is untouched and the
+    # OCR path recovers the beteckning a linearised scan otherwise loses.
     assert names == [
         "prose_objekt_bullet",
         "uc_br_assemble_from_cells",
         "uc_smahus_fastighetsbeteckning",
         "fastighetsrapport_beteckning",
+        "fastighetsrapport_beteckning_ocr",
         "lgh_assemble_from_cells",
     ]

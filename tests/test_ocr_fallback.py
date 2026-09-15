@@ -154,6 +154,38 @@ def test_ocr_text_reruns_guards_and_recovers_fields_as_uncertain(monkeypatch):
     assert diag.value_fields_filled >= 1
 
 
+_FR_BETECKNING_FIXTURE = (
+    Path(__file__).parent / "fixtures" / "ocr" / "fastighetsrapport_beteckning_ocr.json"
+)
+
+
+def test_ocr_fastighetsrapport_recovers_objekt_from_linear_beteckning(monkeypatch):
+    """A Fastighetsrapport's `objekt` is a positional read — the cell *below* the
+    `Beteckning` column header — which OCR linearisation defeats, so an OCR'd
+    fastighetsrapport lost `objekt` even though the beteckning survived the scan
+    (#5909). The OCR-gated fallback anchors on the last header (`Totalareal`) and
+    recovers the designation, marked `uncertain` for review.
+    """
+    fx = json.loads(_FR_BETECKNING_FIXTURE.read_text())
+    monkeypatch.setattr(
+        _context._ocr,
+        "ocr_pdf_pages",
+        lambda *_a, **_k: list(fx["page_texts"]),
+        raising=True,
+    )
+
+    result = extract_document(_scanned_pdf(), "fastighetsrapport_scan.pdf")
+    diag = result.diagnostics
+    by_key = {f.key: f for f in result.fields}
+
+    assert diag.ocr_used is True
+    assert fx["expect_guard"] in diag.guards_matched
+    for key, value in fx["expect_fields"].items():
+        assert by_key[key].value == value, f"{key} not recovered from OCR text"
+        assert by_key[key].confidence == "uncertain", f"{key} not flagged uncertain"
+    assert diag.outcome != OUTCOME_NO_TEXT
+
+
 def test_ocr_recovers_nothing_stays_no_text(monkeypatch):
     """OCR ran (native projections empty) but read nothing → still `no_text`.
 
