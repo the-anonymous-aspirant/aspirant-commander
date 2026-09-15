@@ -99,6 +99,12 @@ def build_context(pdf_bytes: bytes) -> ParseContext:
             # `fitz_full_text` (e.g. _is_lgh_utdrag) then see the OCR output.
             fitz_full_text = "\n".join(ocr_pages)
             ocr_used = True
+            # `words` from pdfplumber was empty (no text layer) — rebuild page
+            # 1's word-box grid from OCR so the positional slot strategies
+            # (`_uc_word_below`, `_label_text_below_in_column`) walk a real grid
+            # instead of missing on the scan (#5932). Degrades to the empty grid
+            # on any OCR-env failure, the same shape as `_ocr_pages_or_empty`.
+            words = _ocr_words_or_empty(pdf_bytes) or words
 
     return ParseContext(
         page1_text=page1_text,
@@ -125,6 +131,21 @@ def _ocr_pages_or_empty(pdf_bytes: bytes) -> list[str]:
     except Exception:  # noqa: BLE001 — any OCR-environment failure degrades to no_text
         logger.exception("OCR fallback failed; treating document as no_text")
         return []
+
+
+def _ocr_words_or_empty(pdf_bytes: bytes) -> tuple[dict, ...]:
+    """Rebuild page 1's word grid from OCR, degrading to ``()`` on failure.
+
+    Reached only once `ocr_pdf_pages` has already succeeded (OCR text recovered),
+    so a failure here is an odd second-pass fault rather than a missing engine;
+    it degrades to the empty grid — the positional strategies then miss, exactly
+    as they did before #5932 — never a 500.
+    """
+    try:
+        return _ocr.ocr_pdf_words(pdf_bytes)
+    except Exception:  # noqa: BLE001 — any OCR-environment failure degrades to an empty grid
+        logger.exception("OCR word-grid rebuild failed; positional slots will miss")
+        return ()
 
 
 def _subkind_or_none(pdf_bytes: bytes) -> str | None:
