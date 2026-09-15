@@ -248,3 +248,27 @@ def ensure_ocr_used_column(engine: Engine) -> None:
                 f"DEFAULT false"
             )
         )
+
+
+_DIAG_SUBKIND_COLUMN = "no_text_subkind"
+
+
+def ensure_no_text_subkind_column(engine: Engine) -> None:
+    """Add ``extraction_diagnostics.no_text_subkind`` to a table predating it (#5910).
+
+    Nullable, so a pre-existing row simply has no sub-kind — no backfill and no
+    NOT NULL to satisfy. ``create_all`` never ALTERs an existing table, so a
+    deploy already holding rows needs this idempotent ``ADD COLUMN IF NOT
+    EXISTS``. On a fresh database ``create_all`` already built the column and
+    this is a no-op.
+    """
+    inspector = inspect(engine)
+    if not inspector.has_table(_DIAG_TABLE):
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                f"ALTER TABLE {_DIAG_TABLE} "
+                f"ADD COLUMN IF NOT EXISTS {_DIAG_SUBKIND_COLUMN} VARCHAR(32)"
+            )
+        )

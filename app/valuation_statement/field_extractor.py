@@ -1274,6 +1274,7 @@ def _build_diagnostics(
         # its own outcome and listing every expected slot there would mislead.
         missed_expected_slots=missed_expected if filled else [],
         ocr_used=ctx.ocr_used,
+        no_text_subkind=ctx.no_text_subkind,
     )
 
 

@@ -146,6 +146,7 @@ def _persist_extraction_outcome(db: Session, filename: str, diagnostics) -> None
                 value_fields_total=diagnostics.value_fields_total,
                 missed_expected_slots=list(diagnostics.missed_expected_slots),
                 ocr_used=diagnostics.ocr_used,
+                no_text_subkind=diagnostics.no_text_subkind,
             )
         )
         cutoff = datetime.now(timezone.utc) - timedelta(days=DIAGNOSTIC_RETENTION_DAYS)

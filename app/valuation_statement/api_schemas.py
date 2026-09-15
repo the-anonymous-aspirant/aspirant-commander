@@ -55,6 +55,11 @@ class ExtractionDiagnosticsOut(BaseModel):
     # such a run are surfaced as `uncertain`; a `no_text` row with this set had
     # OCR tried and recovered nothing.
     ocr_used: bool = False
+    # For an image-only document: "reprinted_vector" / "raster_scan" /
+    # "unknown", or null when the document carried text (#5910). The client
+    # keys its hint on this and treats absent/unknown as "keep the current
+    # copy".
+    no_text_subkind: str | None = None
 
 
 class ExtractionResultOut(BaseModel):

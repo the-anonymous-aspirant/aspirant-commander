@@ -94,6 +94,12 @@ class ExtractionDiagnostics:
     # OCR was never attempted, and marks an `extracted`/`partial` row whose
     # values came from OCR — those values are surfaced as `uncertain`.
     ocr_used: bool = False
+    # For an image-only PDF (native projections empty), which kind: a digital
+    # PDF re-printed to outlined glyphs (`reprinted_vector` — the answer is to
+    # upload the original), a photo/scan (`raster_scan` — OCR territory), or
+    # `unknown`. None when the document carried text. The client keys its hint
+    # on this and treats absent/`unknown` as "keep the current copy" (#5910).
+    no_text_subkind: str | None = None
 
 
 @dataclass

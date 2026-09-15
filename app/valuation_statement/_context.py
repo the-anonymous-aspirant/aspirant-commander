@@ -44,6 +44,13 @@ class ParseContext:
     # on such a row means "OCR was tried and recovered nothing", distinct from
     # "OCR was never attempted".
     ocr_used: bool = False
+    # When the native projections were empty, which kind of image-only PDF this
+    # is: "reprinted_vector" (a digital PDF re-printed to outlined glyphs — the
+    # right answer is to upload the original), "raster_scan" (a photo/scan —
+    # OCR territory), or "unknown". None on every document that carried text.
+    # The client keys its hint on this; absent/unknown falls back to the current
+    # copy (#5910).
+    no_text_subkind: str | None = None
 
     @property
     def page_count(self) -> int:
@@ -72,12 +79,17 @@ def build_context(pdf_bytes: bytes) -> ParseContext:
         fitz_full_text = "\n".join((page.get_text() or "") for page in doc)
 
     ocr_used = False
+    no_text_subkind = None
     if not (page1_text.strip() or fitz_full_text.strip()):
-        # No text under either native projection: a scan or a photograph. OCR
-        # the rasterised pages so the existing guards and slot strategies get a
-        # text projection to match against. A digital PDF never reaches here,
-        # so it never rasters and never imports the OCR engine — zero added
-        # latency on the normal path (#5907).
+        # No text under either native projection: a scan or a photograph.
+        # Classify which kind (a re-printed vector PDF wants "upload the
+        # original", a true scan wants OCR) before OCR runs, so the client can
+        # give the right advice regardless of whether OCR then recovers a field
+        # (#5910). Then OCR the rasterised pages so the existing guards and slot
+        # strategies get a text projection to match against. A digital PDF never
+        # reaches here, so it never rasters and never imports the OCR engine —
+        # zero added latency on the normal path (#5907).
+        no_text_subkind = _subkind_or_none(pdf_bytes)
         ocr_pages = _ocr_pages_or_empty(pdf_bytes)
         if ocr_pages:
             page_texts = tuple(ocr_pages)
@@ -95,6 +107,7 @@ def build_context(pdf_bytes: bytes) -> ParseContext:
         fitz_full_text=fitz_full_text,
         _pdf_bytes=pdf_bytes,
         ocr_used=ocr_used,
+        no_text_subkind=no_text_subkind,
     )
 
 
@@ -112,3 +125,17 @@ def _ocr_pages_or_empty(pdf_bytes: bytes) -> list[str]:
     except Exception:  # noqa: BLE001 — any OCR-environment failure degrades to no_text
         logger.exception("OCR fallback failed; treating document as no_text")
         return []
+
+
+def _subkind_or_none(pdf_bytes: bytes) -> str | None:
+    """Classify the image-only PDF's sub-kind, degrading to None on any error.
+
+    The sub-kind only refines the client's hint; if fitz cannot read the page
+    structure the client falls back to its current copy, so a failure here must
+    never break extraction (#5910).
+    """
+    try:
+        return _ocr.classify_no_text_subkind(pdf_bytes)
+    except Exception:  # noqa: BLE001 — classification is advisory; None = client falls back
+        logger.exception("no_text sub-kind classification failed")
+        return None
