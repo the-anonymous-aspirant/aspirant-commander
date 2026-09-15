@@ -76,6 +76,10 @@ fi
 #                       no_text), i.e. what a miss is called.
 #   _context.py         the two text projections every strategy queries; a
 #                       change here changes what all of them see.
+#   _ocr.py             the OCR fallback that rebuilds those projections for a
+#                       scan (#5907); a change here changes what the strategies
+#                       see on an image-only document, so it decides what such a
+#                       document extracts just as _context.py does.
 #
 # Deliberately NOT armed: routes.py, api_schemas.py, processed.py, template.py,
 # pdf_export.py, transparency.py. Those carry the extraction to the operator;
@@ -86,6 +90,7 @@ ARMING_PATHS=(
     "app/valuation_statement/field_extractor.py"
     "app/valuation_statement/extraction.py"
     "app/valuation_statement/_context.py"
+    "app/valuation_statement/_ocr.py"
 )
 
 strategy_files_touched=""

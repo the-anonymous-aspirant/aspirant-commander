@@ -60,11 +60,18 @@ class ExtractionDiagnostics:
       * `unrecognised`          — no guard matched at all, on a document
                                   that did carry text: a layout the strategy
                                   library does not cover.
-      * `no_text`               — neither text projection yielded a single
-                                  non-whitespace character. A scan or a
-                                  photograph; no fingerprint can ever match
-                                  it, so it is not a coverage gap and adding
-                                  a strategy would not help.
+      * `no_text`               — neither NATIVE text projection yielded a
+                                  single non-whitespace character. A scan or a
+                                  photograph. Since #5907 the OCR fallback runs
+                                  on this branch: if it recovers a value the
+                                  outcome becomes `extracted`/`partial` with
+                                  `ocr_used` set; `no_text` now means the
+                                  native projections were empty AND OCR either
+                                  recovered nothing or was unavailable. Adding
+                                  a text-matching strategy still would not help
+                                  a row where OCR recovered nothing — there is
+                                  no text for any fingerprint to fire on — but
+                                  `ocr_used` tells the two apart.
     """
 
     outcome: str
@@ -81,6 +88,12 @@ class ExtractionDiagnostics:
     # did not. Empty on a complete or a total-miss run; non-empty is what makes
     # `partial` a partial. Keys are schema identifiers, not document content.
     missed_expected_slots: list[str] = field(default_factory=list)
+    # True when the text projections were OCR-rebuilt from a rasterised scan
+    # because both native projections were empty (#5907). Distinguishes a
+    # `no_text` row where OCR was tried and recovered nothing from one where
+    # OCR was never attempted, and marks an `extracted`/`partial` row whose
+    # values came from OCR — those values are surfaced as `uncertain`.
+    ocr_used: bool = False
 
 
 @dataclass

@@ -219,3 +219,32 @@ def ensure_missed_expected_slots_column(engine: Engine) -> None:
                 f"DEFAULT '[]'::jsonb"
             )
         )
+
+
+_DIAG_OCR_USED_COLUMN = "ocr_used"
+
+
+def ensure_ocr_used_column(engine: Engine) -> None:
+    """Add ``extraction_diagnostics.ocr_used`` to a table predating it (#5907).
+
+    The table shipped before the OCR fallback; this boolean records whether a
+    row's text projections were OCR-rebuilt from a scan. ``create_all`` never
+    ALTERs an existing table, so a deploy already holding diagnostic rows needs
+    an explicit add. Idempotent and safe on every boot: ``ADD COLUMN IF NOT
+    EXISTS`` with a constant ``false`` default is a metadata-only change on
+    Postgres (no table rewrite) that backfills existing rows to ``false``. On a
+    fresh database ``create_all`` already built the column NOT NULL from the
+    model and this is a no-op.
+    """
+    inspector = inspect(engine)
+    if not inspector.has_table(_DIAG_TABLE):
+        # Fresh DB before create_all, or a deploy without the diagnostics table.
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                f"ALTER TABLE {_DIAG_TABLE} "
+                f"ADD COLUMN IF NOT EXISTS {_DIAG_OCR_USED_COLUMN} BOOLEAN NOT NULL "
+                f"DEFAULT false"
+            )
+        )

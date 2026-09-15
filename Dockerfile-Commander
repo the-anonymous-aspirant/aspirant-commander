@@ -4,11 +4,20 @@ FROM python:3.11-slim
 # .docx to .pdf at download time. libreoffice-core alone adds roughly
 # 350 MB to the image; the full libreoffice meta-package adds ~1 GB and
 # is unnecessary for headless conversion.
+#
+# tesseract-ocr + tesseract-ocr-swe are the OCR engine and Swedish language
+# model for the image-only-PDF fallback (#5907): a scanned or photographed
+# valuation carries no text layer, so pytesseract runs Tesseract over the
+# rasterised pages. The `swe` model is required — these are Swedish documents —
+# and OCR runs on-cell so client documents never egress to a third-party OCR
+# service.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         libreoffice-core \
         libreoffice-writer \
         fonts-dejavu \
+        tesseract-ocr \
+        tesseract-ocr-swe \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
