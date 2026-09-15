@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import ExtractionDiagnostic
+from app.valuation_statement.processed import require_caller_id
 
 from app.valuation_statement.api_schemas import (
     ComparableSale,
@@ -164,7 +165,9 @@ def _persist_extraction_outcome(db: Session, filename: str, diagnostics) -> None
 
 @router.post("/extract", response_model=ExtractResponse)
 async def extract_uploads(
-    files: list[UploadFile] = File(...), db: Session = Depends(get_db)
+    files: list[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+    caller: int = Depends(require_caller_id),
 ):
     """Parse one or more uploaded PDFs via the field-first extractor.
 
@@ -210,7 +213,7 @@ async def extract_uploads(
 
     return ExtractResponse(
         documents=results,
-        operator_defaults=_load_operator_defaults(),
+        operator_defaults=_load_operator_defaults(caller),
     )
 
 
@@ -321,62 +324,75 @@ def generate_filled_docx(
 
 # ---------- operator defaults ----------
 
-_DEFAULTS_ENV = "VALUATION_OPERATOR_DEFAULTS_PATH"
+_DEFAULTS_DIR_ENV = "VALUATION_OPERATOR_DEFAULTS_DIR"
 
 
-# First-time-load values taken from the operator's ground-truth examples
-# (Värdeutlåtande{BR,Hok}.pdf). Surfaced when no persisted defaults file
-# exists yet so the operator doesn't have to retype the same identity on
-# every fresh deploy. Overwritten the moment they tick 'Spara'.
-_EXAMPLE_DEFAULTS = OperatorDefaults(
-    ort="Nynäshamn",
-    maklare_namn="Jenny Wiklund",
-    maklare_titel="Registrerad fastighetsmäklare",
-    foretag="Fastighetsbyrån",
-    likviditet="normal",
-)
+# Appraiser identity is PER-USER (#5924): `maklare_namn` / `maklare_titel` /
+# `foretag` / `ort` belong to the appraiser whose documents carry them, not to
+# a shared service config. So the first-time-load default is EMPTY — an empty
+# form is safer than one pre-filled with a specific real person's name, which
+# would sign a second appraiser's valuations with the first appraiser's identity
+# (and a source-code default cannot represent two users). `likviditet` keeps its
+# neutral starting value. Continuity for the existing appraiser is a one-time
+# per-user seed written as cell data, never a source-code default.
+_EMPTY_DEFAULTS = OperatorDefaults()
 
 
-def _load_operator_defaults() -> OperatorDefaults:
-    """Read persisted appraiser-identity defaults from a JSON file.
-
-    The path is settable via VALUATION_OPERATOR_DEFAULTS_PATH (defaults to
-    /data/commander/valuation_defaults.json). When no file exists yet,
-    falls back to the ground-truth example identity so first-time-load
-    isn't a blank form; once the operator saves, the file is authoritative.
-    """
-    import json
+def _operator_defaults_dir() -> "Path":
     from pathlib import Path
 
-    path = Path(os.environ.get(_DEFAULTS_ENV, "/data/commander/valuation_defaults.json"))
+    return Path(os.environ.get(_DEFAULTS_DIR_ENV, "/data/commander/operator_defaults"))
+
+
+def _operator_defaults_path(user_id: int) -> "Path":
+    """The per-user identity file. One file per appraiser, keyed by the
+    server-verified caller id, so no user's write can touch another's."""
+    return _operator_defaults_dir() / f"{user_id}.json"
+
+
+def _load_operator_defaults(user_id: int) -> OperatorDefaults:
+    """Read one appraiser's own persisted identity defaults.
+
+    Keyed by the caller id (the aspirant-server proxy sets `X-Aspirant-User-Id`
+    from the verified session and strips any client value, #3096). When the user
+    has never saved, returns the EMPTY default — not another user's identity and
+    not a hardcoded name.
+    """
+    import json
+
+    path = _operator_defaults_path(user_id)
     if not path.exists():
-        return _EXAMPLE_DEFAULTS.model_copy()
+        return _EMPTY_DEFAULTS.model_copy()
     try:
-        data = json.loads(path.read_text())
-        return OperatorDefaults(**data)
+        return OperatorDefaults(**json.loads(path.read_text()))
     except Exception as exc:
         logger.warning("Failed to load operator defaults at %s: %s", path, exc)
-        return _EXAMPLE_DEFAULTS.model_copy()
+        return _EMPTY_DEFAULTS.model_copy()
 
 
 @router.get("/operator-defaults", response_model=OperatorDefaults)
-def get_operator_defaults():
-    """Read the persisted appraiser-identity defaults.
+def get_operator_defaults(caller: int = Depends(require_caller_id)):
+    """Read the caller's own persisted appraiser-identity defaults.
 
     Mirrors the `operator_defaults` block embedded in `/extract`'s response
     so the frontend (or a manual-entry caller) can hydrate the form without
-    first uploading a PDF.
+    first uploading a PDF. Scoped to the caller — never a shared record.
     """
-    return _load_operator_defaults()
+    return _load_operator_defaults(caller)
 
 
 @router.put("/operator-defaults", response_model=OperatorDefaults)
-def save_operator_defaults(body: OperatorDefaults):
-    """Persist the appraiser-identity defaults seen on the review step."""
-    import json
-    from pathlib import Path
+def save_operator_defaults(
+    body: OperatorDefaults, caller: int = Depends(require_caller_id)
+):
+    """Persist the caller's OWN appraiser identity (#5924).
 
-    path = Path(os.environ.get(_DEFAULTS_ENV, "/data/commander/valuation_defaults.json"))
+    The write is scoped to the caller's id (from the forge-proof proxy header),
+    so a Member can only ever change their own identity — there is no shared
+    record to corrupt, which is why this is Member-writable without re-opening
+    the #3182 integrity finding that gated the old single global record.
+    """
+    path = _operator_defaults_path(caller)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body.model_dump_json(indent=2))
     return body
