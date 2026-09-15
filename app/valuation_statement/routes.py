@@ -9,7 +9,7 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import ExtractionDiagnostic
+from app.models import ExtractionDiagnostic, ProcessedValuation
 from app.valuation_statement.processed import require_caller_id
 
 from app.valuation_statement.api_schemas import (
@@ -224,7 +224,7 @@ async def extract_uploads(
 
     return ExtractResponse(
         documents=results,
-        operator_defaults=_load_operator_defaults(caller),
+        operator_defaults=_load_operator_defaults(caller, db),
     )
 
 
@@ -284,7 +284,21 @@ def generate_filled_docx(
     `?format=pdf` runs the docx through LibreOffice headless and returns
     the resulting PDF; if LibreOffice isn't installed the endpoint
     surfaces a 503 so the caller can fall back to the docx flow.
+
+    Refuses when the signing appraiser name is blank (#5943): a värdeutlåtande
+    with no mäklarnamn is an unsigned document, and silently emitting one is the
+    worst available behaviour — a user whose identity has not been set (a brand-
+    new account, or one not yet seeded) is told to set it rather than handed a
+    blank-signed statement.
     """
+    if not (body.maklare_namn or "").strip():
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Appraiser name (mäklarnamn) is required to sign the "
+                "värdeutlåtande. Set your appraiser identity before generating."
+            ),
+        )
     fields = TemplateFields(
         objekt=body.objekt,
         objekt_short=body.objekt_short,
@@ -361,13 +375,69 @@ def _operator_defaults_path(user_id: int) -> "Path":
     return _operator_defaults_dir() / f"{user_id}.json"
 
 
-def _load_operator_defaults(user_id: int | None) -> OperatorDefaults:
+# The appraiser-identity fields carried verbatim in a värdeutlåtande's
+# `final_values`. A user's own history is the authoritative source for their
+# effective identity when their per-user file has not been written yet (#5943).
+_IDENTITY_KEYS = ("ort", "maklare_namn", "maklare_titel", "foretag", "likviditet")
+
+
+def _seed_defaults_from_history(
+    user_id: int, db: "Session"
+) -> OperatorDefaults | None:
+    """Derive a user's identity from their most recent signed valuation.
+
+    #5924 moved identity to a per-user file and (correctly) shipped no source-code
+    default, but nothing carried the pre-#5924 value into the new home, so an
+    existing appraiser's identity came back empty and every generated document
+    would have been signed with a blank mäklarnamn (#5943). Their own
+    `processed_valuations.final_values` carries the identity verbatim, so the
+    latest row bearing a non-empty name is the authoritative seed — a read of the
+    user's own record, never a guess or another user's identity.
+
+    Returns None when the user has no history bearing a name (a brand-new user),
+    so the caller falls back to the EMPTY default rather than inventing one.
+    """
+    row = (
+        db.query(ProcessedValuation.final_values)
+        .filter(
+            ProcessedValuation.owner_user_id == user_id,
+            ProcessedValuation.final_values["maklare_namn"].astext.isnot(None),
+            ProcessedValuation.final_values["maklare_namn"].astext != "",
+        )
+        .order_by(ProcessedValuation.created_at.desc())
+        .first()
+    )
+    if row is None:
+        return None
+    final_values = row[0] or {}
+    name = (final_values.get("maklare_namn") or "").strip()
+    if not name:
+        return None
+    return OperatorDefaults(
+        ort=final_values.get("ort"),
+        maklare_namn=name,
+        maklare_titel=final_values.get("maklare_titel"),
+        foretag=final_values.get("foretag"),
+        likviditet=final_values.get("likviditet") or "normal",
+    )
+
+
+def _load_operator_defaults(
+    user_id: int | None, db: "Session | None" = None
+) -> OperatorDefaults:
     """Read one appraiser's own persisted identity defaults.
 
     Keyed by the caller id (the aspirant-server proxy sets `X-Aspirant-User-Id`
     from the verified session and strips any client value, #3096). When the user
     has never saved — or is unknown — returns the EMPTY default, never another
     user's identity and never a hardcoded name.
+
+    When the per-user file is absent and a db session is available, seed it once
+    from the user's own valuation history (#5943): the seed is written to the
+    file so it becomes the user's editable record and never re-derives, and it
+    only ever fires when no file exists, so an explicit save (or a hand-restored
+    identity) is never overwritten. A user with no history seeds nothing and
+    reads empty.
     """
     import json
 
@@ -375,6 +445,11 @@ def _load_operator_defaults(user_id: int | None) -> OperatorDefaults:
         return _EMPTY_DEFAULTS.model_copy()
     path = _operator_defaults_path(user_id)
     if not path.exists():
+        if db is not None:
+            seeded = _seed_defaults_from_history(user_id, db)
+            if seeded is not None:
+                _write_operator_defaults(user_id, seeded)
+                return seeded
         return _EMPTY_DEFAULTS.model_copy()
     try:
         return OperatorDefaults(**json.loads(path.read_text()))
@@ -383,15 +458,25 @@ def _load_operator_defaults(user_id: int | None) -> OperatorDefaults:
         return _EMPTY_DEFAULTS.model_copy()
 
 
+def _write_operator_defaults(user_id: int, defaults: OperatorDefaults) -> None:
+    """Persist one appraiser's identity to their per-user file."""
+    path = _operator_defaults_path(user_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(defaults.model_dump_json(indent=2))
+
+
 @router.get("/operator-defaults", response_model=OperatorDefaults)
-def get_operator_defaults(caller: int = Depends(require_caller_id)):
+def get_operator_defaults(
+    caller: int = Depends(require_caller_id), db: Session = Depends(get_db)
+):
     """Read the caller's own persisted appraiser-identity defaults.
 
     Mirrors the `operator_defaults` block embedded in `/extract`'s response
     so the frontend (or a manual-entry caller) can hydrate the form without
-    first uploading a PDF. Scoped to the caller — never a shared record.
+    first uploading a PDF. Scoped to the caller — never a shared record. On a
+    first load with no file, seeds once from the caller's own history (#5943).
     """
-    return _load_operator_defaults(caller)
+    return _load_operator_defaults(caller, db)
 
 
 @router.put("/operator-defaults", response_model=OperatorDefaults)
@@ -405,7 +490,5 @@ def save_operator_defaults(
     record to corrupt, which is why this is Member-writable without re-opening
     the #3182 integrity finding that gated the old single global record.
     """
-    path = _operator_defaults_path(caller)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(body.model_dump_json(indent=2))
+    _write_operator_defaults(caller, body)
     return body

@@ -539,6 +539,94 @@ def test_operator_defaults_require_a_caller(make_client, tmp_path, monkeypatch):
     ).status_code == 401
 
 
+# ---------- operator-defaults seed from history (#5943) ----------
+
+
+def _add_valuation_history(db_session, owner_user_id, final_values, name="doc.pdf"):
+    """Insert one processed_valuations row the seed can read as history."""
+    from app.models import ProcessedValuation
+
+    row = ProcessedValuation(
+        name=name, owner_user_id=owner_user_id, final_values=final_values
+    )
+    db_session.add(row)
+    db_session.commit()
+
+
+def test_operator_defaults_seed_from_history_on_first_load(
+    make_client, db_session, tmp_path, monkeypatch
+):
+    """#5924 shipped no source-code default and did not migrate the old value, so
+    an existing appraiser's identity came back empty and every generated document
+    would carry a blank mäklarnamn (#5943). With no file yet, the first load
+    seeds the identity from the user's own most-recent signed valuation and
+    persists it, so the value is populated without hand-patching."""
+    monkeypatch.setenv("VALUATION_OPERATOR_DEFAULTS_DIR", str(tmp_path))
+    _add_valuation_history(
+        db_session,
+        501,
+        {
+            "ort": "Nynäshamn",
+            "maklare_namn": "Jenny Wiklund",
+            "maklare_titel": "Registrerad fastighetsmäklare",
+            "foretag": "Fastighetsbyrån",
+            "likviditet": "normal",
+        },
+    )
+    user = make_client(501)
+
+    got = user.get("/valuation-statement/operator-defaults").json()
+    assert got["maklare_namn"] == "Jenny Wiklund"
+    assert got["ort"] == "Nynäshamn"
+    assert got["foretag"] == "Fastighetsbyrån"
+    # The seed is written to the per-user file, so it is now the editable record.
+    assert (tmp_path / "501.json").exists()
+
+
+def test_operator_defaults_seed_never_overwrites_a_saved_identity(
+    make_client, db_session, tmp_path, monkeypatch
+):
+    """The seed only fires when no file exists, so an explicit save — or a
+    hand-restored identity like Jenny's mitigation — is never overwritten by a
+    differing history value."""
+    monkeypatch.setenv("VALUATION_OPERATOR_DEFAULTS_DIR", str(tmp_path))
+    user = make_client(502)
+    user.put(
+        "/valuation-statement/operator-defaults",
+        json={"maklare_namn": "Saved Name", "foretag": "Saved AB", "likviditet": "god"},
+    )
+    _add_valuation_history(
+        db_session, 502, {"maklare_namn": "History Name", "foretag": "History AB"}
+    )
+
+    got = user.get("/valuation-statement/operator-defaults").json()
+    assert got["maklare_namn"] == "Saved Name"
+    assert got["foretag"] == "Saved AB"
+
+
+def test_operator_defaults_no_history_stays_empty(
+    make_client, db_session, tmp_path, monkeypatch
+):
+    """A brand-new user has no history to seed from, so the read is empty (never
+    another user's identity) — the first-run case the #5943 refusal guards at
+    generation time."""
+    monkeypatch.setenv("VALUATION_OPERATOR_DEFAULTS_DIR", str(tmp_path))
+    got = make_client(503).get("/valuation-statement/operator-defaults").json()
+    assert got["maklare_namn"] is None
+
+
+def test_operator_defaults_seed_ignores_history_without_a_name(
+    make_client, db_session, tmp_path, monkeypatch
+):
+    """History that itself carries no name is not a valid seed — a blank source
+    must not populate the identity, or the migration would launder the same blank
+    it exists to prevent."""
+    monkeypatch.setenv("VALUATION_OPERATOR_DEFAULTS_DIR", str(tmp_path))
+    _add_valuation_history(db_session, 504, {"ort": "Malmö", "maklare_namn": ""})
+    got = make_client(504).get("/valuation-statement/operator-defaults").json()
+    assert got["maklare_namn"] is None
+
+
 # ---------- PDF export ----------
 
 
@@ -592,6 +680,18 @@ def test_generate_pdf_503_when_libreoffice_missing(client, monkeypatch):
     r = client.post("/valuation-statement/generate?format=pdf", json=_GENERATE_BODY)
     assert r.status_code == 503
     assert "soffice" in r.json()["detail"].lower()
+
+
+def test_generate_refuses_a_blank_maklare_namn(client):
+    """A värdeutlåtande with no signing name is an unsigned document; emitting
+    one silently is the worst behaviour (#5943), so generation is refused with a
+    422 that tells the user to set their appraiser identity first. Covers the
+    first-run/unseeded case where the identity is still empty."""
+    for blank in ("", "   "):
+        body = {**_GENERATE_BODY, "maklare_namn": blank}
+        r = client.post("/valuation-statement/generate", json=body)
+        assert r.status_code == 422, f"blank name {blank!r} was not refused"
+        assert "identity" in r.json()["detail"].lower()
 
 
 def test_generate_default_format_is_docx(client):
