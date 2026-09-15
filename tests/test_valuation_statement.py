@@ -465,27 +465,26 @@ class TestComparableRowParserUnit:
 # ---------- operator defaults ----------
 
 
-def test_operator_defaults_first_load_returns_example_values(client, tmp_path, monkeypatch):
-    """No file yet → GET returns the ground-truth identity so the review
-    step is pre-filled on first deploy instead of blank."""
-    monkeypatch.setenv(
-        "VALUATION_OPERATOR_DEFAULTS_PATH", str(tmp_path / "valuation_defaults.json")
-    )
+def test_operator_defaults_first_load_is_empty_not_a_real_name(client, tmp_path, monkeypatch):
+    """No file yet → GET returns an EMPTY identity, never a hardcoded real
+    person's name (#5924). An empty form is safer than one pre-filled with a
+    specific appraiser's identity that would sign a second appraiser's work."""
+    monkeypatch.setenv("VALUATION_OPERATOR_DEFAULTS_DIR", str(tmp_path))
     r = client.get("/valuation-statement/operator-defaults")
     assert r.status_code == 200
     defaults = r.json()
-    assert defaults["maklare_namn"] == "Jenny Wiklund"
-    assert defaults["maklare_titel"] == "Registrerad fastighetsmäklare"
-    assert defaults["foretag"] == "Fastighetsbyrån"
-    assert defaults["ort"] == "Nynäshamn"
+    assert defaults["maklare_namn"] is None
+    assert defaults["maklare_titel"] is None
+    assert defaults["foretag"] is None
+    assert defaults["ort"] is None
+    # likviditet keeps a neutral starting value, not a personal identity.
     assert defaults["likviditet"] == "normal"
 
 
-def test_operator_defaults_saved_values_override_examples(client, tmp_path, monkeypatch):
-    """After PUT, GET reflects the saved values — including a blank ort,
-    which is a legitimate operator choice for the 'date-only' footer."""
-    path = tmp_path / "valuation_defaults.json"
-    monkeypatch.setenv("VALUATION_OPERATOR_DEFAULTS_PATH", str(path))
+def test_operator_defaults_saved_values_round_trip(client, tmp_path, monkeypatch):
+    """After a caller's PUT, their GET reflects the saved values — including a
+    blank ort, a legitimate choice for the 'date-only' footer."""
+    monkeypatch.setenv("VALUATION_OPERATOR_DEFAULTS_DIR", str(tmp_path))
 
     saved = {
         "ort": "",
@@ -496,7 +495,6 @@ def test_operator_defaults_saved_values_override_examples(client, tmp_path, monk
     }
     put = client.put("/valuation-statement/operator-defaults", json=saved)
     assert put.status_code == 200
-    assert path.exists()
 
     r = client.get("/valuation-statement/operator-defaults")
     assert r.status_code == 200
@@ -504,6 +502,41 @@ def test_operator_defaults_saved_values_override_examples(client, tmp_path, monk
     assert defaults["maklare_namn"] == "Anna Andersson"
     assert defaults["ort"] == ""
     assert defaults["likviditet"] == "god"
+
+
+def test_operator_defaults_are_per_user(make_client, tmp_path, monkeypatch):
+    """One appraiser's identity is independent of another's, and neither can
+    overwrite the other — the modelling fix behind #5924. Scoping is by the
+    server-verified caller id, so a Member only ever writes their own record."""
+    monkeypatch.setenv("VALUATION_OPERATOR_DEFAULTS_DIR", str(tmp_path))
+    alice = make_client(101)
+    bob = make_client(202)
+
+    alice.put(
+        "/valuation-statement/operator-defaults",
+        json={"maklare_namn": "Alice", "foretag": "Alice AB", "likviditet": "normal"},
+    )
+    bob.put(
+        "/valuation-statement/operator-defaults",
+        json={"maklare_namn": "Bob", "foretag": "Bob AB", "likviditet": "god"},
+    )
+
+    assert alice.get("/valuation-statement/operator-defaults").json()["maklare_namn"] == "Alice"
+    assert bob.get("/valuation-statement/operator-defaults").json()["maklare_namn"] == "Bob"
+    # A third user who never saved sees an empty record, not either identity.
+    carol = make_client(303)
+    assert carol.get("/valuation-statement/operator-defaults").json()["maklare_namn"] is None
+
+
+def test_operator_defaults_require_a_caller(make_client, tmp_path, monkeypatch):
+    """No caller identity → fail closed (401), never served against or writing a
+    shared record. Guards the pre-#3096 open behaviour from returning."""
+    monkeypatch.setenv("VALUATION_OPERATOR_DEFAULTS_DIR", str(tmp_path))
+    anon = make_client(None)
+    assert anon.get("/valuation-statement/operator-defaults").status_code == 401
+    assert anon.put(
+        "/valuation-statement/operator-defaults", json={"maklare_namn": "x"}
+    ).status_code == 401
 
 
 # ---------- PDF export ----------

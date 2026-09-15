@@ -55,9 +55,9 @@ class TemplateFields:
     # Identity footer.
     ort: str                    # "Stockholm"
     datum: str                  # "18/6/2026"
-    maklare_namn: str           # "Jenny Wiklund"
+    maklare_namn: str           # "Anna Andersson"
     maklare_titel: str          # "Registrerad fastighetsmäklare"
-    foretag: str                # "Fastighetsbyrån"
+    foretag: str                # "Andersson Mäkleri"
 
     # Mode is derived from upplatelseform but kept explicit so callers can
     # override the LGH-vs-fastighet identifier branch.
