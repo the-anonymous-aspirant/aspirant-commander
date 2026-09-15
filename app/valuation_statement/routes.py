@@ -13,6 +13,8 @@ from app.models import ExtractionDiagnostic
 
 from app.valuation_statement.api_schemas import (
     ComparableSale,
+    DecideResponse,
+    DecideResult,
     ExtractedFieldOut,
     ExtractionDiagnosticsOut,
     ExtractResponse,
@@ -23,6 +25,7 @@ from app.valuation_statement.api_schemas import (
 from app.valuation_statement.extraction import (
     OUTCOME_EXTRACTED,
     OUTCOME_PARTIAL,
+    decide_extraction,
     extract_document,
 )
 from app.valuation_statement.pdf_export import (
@@ -208,6 +211,51 @@ async def extract_uploads(
     return ExtractResponse(
         documents=results,
         operator_defaults=_load_operator_defaults(),
+    )
+
+
+@router.post("/decide", response_model=DecideResponse)
+async def decide_uploads(files: list[UploadFile] = File(...)):
+    """Fast pre-flight for the wizard's uploads (#5915).
+
+    Per file: does it need OCR, which image-only sub-kind, how many pages, and
+    an OCR-time estimate — everything `/extract` knows within ~1.4s but does not
+    send until its ~24s blocking POST returns. The client calls this first so it
+    can announce the image-scanning phase and its estimate instead of spinning
+    silently. No OCR is run here; the digital-PDF case returns
+    `ocr_required=false` and a zero estimate.
+    """
+    if not files:
+        raise HTTPException(status_code=400, detail="At least one PDF must be uploaded.")
+
+    results: list[DecideResult] = []
+    for upload in files:
+        pdf_bytes = await upload.read()
+        if len(pdf_bytes) > MAX_PDF_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"{upload.filename}: exceeds {MAX_PDF_BYTES // (1024 * 1024)} MB limit.",
+            )
+        if not pdf_bytes.startswith(b"%PDF"):
+            raise HTTPException(
+                status_code=415,
+                detail=f"{upload.filename}: file is not a PDF.",
+            )
+        decision = decide_extraction(pdf_bytes)
+        results.append(
+            DecideResult(
+                filename=upload.filename or "<unnamed>",
+                ocr_required=decision.ocr_required,
+                no_text_subkind=decision.no_text_subkind,
+                page_count=decision.page_count,
+                estimated_ocr_seconds=decision.estimated_ocr_seconds,
+            )
+        )
+
+    return DecideResponse(
+        documents=results,
+        any_ocr_required=any(r.ocr_required for r in results),
+        estimated_seconds=sum(r.estimated_ocr_seconds for r in results),
     )
 
 
