@@ -334,6 +334,15 @@ def _canonical_via_fitz(ctx: ParseContext, raw: str) -> str:
     from both and matching gives us the human-readable form without
     having to hand-tune a CamelCase splitter for every Swedish compound
     street name.
+
+    On the OCR path (#5932) the word grid is likewise spaceless-per-cell, but
+    the text projection is Tesseract's linearisation, which puts a whole table
+    ROW on one line (`Bengtsfors NÄRSIDAN 1:21 2019-02-11 2 089`) rather than
+    each cell on its own line. The digital line-equality lookup never matches
+    there, so when `ctx.ocr_used` we fall back to locating the target as a
+    space-stripped SUBSTRING of a line and returning just that span with its
+    original spacing. The fallback is gated on `ocr_used`, so the digital path
+    is byte-for-byte unchanged.
     """
     target = re.sub(r"\s+", "", raw)
     if not target:
@@ -342,7 +351,39 @@ def _canonical_via_fitz(ctx: ParseContext, raw: str) -> str:
         candidate = line.strip()
         if re.sub(r"\s+", "", candidate) == target:
             return candidate
+    if ctx.ocr_used:
+        span = _ocr_span_for(ctx.fitz_full_text, target)
+        if span is not None:
+            return span
     return raw
+
+
+def _ocr_span_for(text: str, target: str) -> str | None:
+    """Return the original span of `text` whose space-stripped form starts with
+    `target`, or None. Used only on the OCR path (see `_canonical_via_fitz`).
+
+    Walks each line building its space-stripped form alongside the original
+    index of every non-space character, finds the first occurrence of `target`
+    in that stripped form, and returns the original substring spanning the
+    matched characters (spaces between them included). The span is bounded by
+    the length of `target`, so a value never absorbs the neighbouring column
+    that follows it on the linearised row.
+    """
+    for line in text.splitlines():
+        stripped_chars: list[str] = []
+        origin_idx: list[int] = []
+        for i, ch in enumerate(line):
+            if not ch.isspace():
+                stripped_chars.append(ch)
+                origin_idx.append(i)
+        stripped = "".join(stripped_chars)
+        pos = stripped.find(target)
+        if pos == -1:
+            continue
+        start = origin_idx[pos]
+        end = origin_idx[pos + len(target) - 1]
+        return line[start : end + 1]
+    return None
 
 
 # ---------- objekt assembly helpers ----------
