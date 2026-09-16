@@ -324,11 +324,23 @@ def _run_extraction_job(
 
 
 @router.get("/jobs/{job_id}", response_model=JobStatusOut)
-def get_extraction_job(job_id: uuid.UUID, db: Session = Depends(get_db)):
+def get_extraction_job(
+    job_id: uuid.UUID,
+    caller: int = Depends(require_caller_id),
+    db: Session = Depends(get_db),
+):
     """Poll an async extraction job (#5977): its status, and once done, the same
-    result shape /extract returns. 404 when the id is unknown."""
+    result shape /extract returns.
+
+    Scoped to the job's owner (#5986). `result` carries the caller's own
+    valuation documents (member financial PII), so a caller may read only a job
+    whose `caller_id` is their own. A job that is unknown, owned by another
+    caller, or has no recorded owner is reported as 404 identically — never 403 —
+    so a response cannot be used to probe whether another user's job id exists.
+    Identity is fail-closed via `require_caller_id` (401 without it), matching the
+    other per-user endpoints; an unguessable UUID is not an authorisation control."""
     job = db.get(ExtractionJob, job_id)
-    if job is None:
+    if job is None or job.caller_id != caller:
         raise HTTPException(status_code=404, detail="Extraction job not found.")
     return JobStatusOut(status=job.status, result=job.result, error=job.error)
 
