@@ -1,26 +1,38 @@
 import json
 import logging
 import os
+import uuid
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Header,
+    HTTPException,
+    Query,
+    UploadFile,
+)
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
-from app.database import get_db
-from app.models import ExtractionDiagnostic, ProcessedValuation
+from app.database import SessionLocal, get_db
+from app.models import ExtractionDiagnostic, ExtractionJob, ProcessedValuation
 from app.valuation_statement.processed import require_caller_id
 
 from app.valuation_statement.api_schemas import (
     ComparableSale,
     DecideResponse,
     DecideResult,
+    ExtractAsyncAccepted,
     ExtractedFieldOut,
     ExtractionDiagnosticsOut,
     ExtractResponse,
     ExtractionResultOut,
     GenerateRequest,
+    JobStatusOut,
     OperatorDefaults,
 )
 from app.valuation_statement.extraction import (
@@ -174,6 +186,42 @@ def optional_caller_id(
     return x_aspirant_user_id
 
 
+def _validate_pdf(filename: str | None, pdf_bytes: bytes) -> None:
+    """Request-time upload validation shared by /extract and /extract-async, so
+    an over-limit or non-PDF upload gets the same 413/415 on both paths."""
+    if len(pdf_bytes) > MAX_PDF_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"{filename}: exceeds {MAX_PDF_BYTES // (1024 * 1024)} MB limit.",
+        )
+    if not pdf_bytes.startswith(b"%PDF"):
+        raise HTTPException(
+            status_code=415,
+            detail=f"{filename}: file is not a PDF.",
+        )
+
+
+def _extract_one(db: Session, filename: str | None, pdf_bytes: bytes) -> ExtractionResultOut:
+    """Run the field-first extractor on one PDF and persist its diagnostic — the
+    per-file body shared by the sync /extract loop and the async background task,
+    so the two paths cannot drift (#5977)."""
+    parsed = extract_document(pdf_bytes, filename or "<unnamed>")
+    diagnostics = parsed.diagnostics
+    _log_extraction_outcome(parsed.filename, diagnostics)
+    _persist_extraction_outcome(db, parsed.filename, diagnostics)
+    return ExtractionResultOut(
+        filename=parsed.filename,
+        fields=[ExtractedFieldOut(**asdict(field)) for field in parsed.fields],
+        comparable_sales=[
+            ComparableSale(**row) for row in parsed.extras.get("comparable_sales", [])
+        ],
+        outcome=diagnostics.outcome if diagnostics else OUTCOME_EXTRACTED,
+        diagnostics=(
+            ExtractionDiagnosticsOut(**asdict(diagnostics)) if diagnostics else None
+        ),
+    )
+
+
 @router.post("/extract", response_model=ExtractResponse)
 async def extract_uploads(
     files: list[UploadFile] = File(...),
@@ -191,41 +239,98 @@ async def extract_uploads(
     results: list[ExtractionResultOut] = []
     for upload in files:
         pdf_bytes = await upload.read()
-        if len(pdf_bytes) > MAX_PDF_BYTES:
-            raise HTTPException(
-                status_code=413,
-                detail=f"{upload.filename}: exceeds {MAX_PDF_BYTES // (1024 * 1024)} MB limit.",
-            )
-        if not pdf_bytes.startswith(b"%PDF"):
-            raise HTTPException(
-                status_code=415,
-                detail=f"{upload.filename}: file is not a PDF.",
-            )
-
-        parsed = extract_document(pdf_bytes, upload.filename or "<unnamed>")
-        diagnostics = parsed.diagnostics
-        _log_extraction_outcome(parsed.filename, diagnostics)
-        _persist_extraction_outcome(db, parsed.filename, diagnostics)
-        results.append(
-            ExtractionResultOut(
-                filename=parsed.filename,
-                fields=[
-                    ExtractedFieldOut(**asdict(field)) for field in parsed.fields
-                ],
-                comparable_sales=[
-                    ComparableSale(**row) for row in parsed.extras.get("comparable_sales", [])
-                ],
-                outcome=diagnostics.outcome if diagnostics else OUTCOME_EXTRACTED,
-                diagnostics=(
-                    ExtractionDiagnosticsOut(**asdict(diagnostics)) if diagnostics else None
-                ),
-            )
-        )
+        _validate_pdf(upload.filename, pdf_bytes)
+        results.append(_extract_one(db, upload.filename, pdf_bytes))
 
     return ExtractResponse(
         documents=results,
         operator_defaults=_load_operator_defaults(caller, db),
     )
+
+
+@router.post("/extract-async", response_model=ExtractAsyncAccepted, status_code=202)
+async def extract_uploads_async(
+    background_tasks: BackgroundTasks,
+    files: list[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+    caller: int | None = Depends(optional_caller_id),
+):
+    """Submit extraction as a background job and return its id at once (#5977).
+
+    The ~100s Cloudflare edge (#5969) cuts any synchronous /extract that runs
+    long (OCR on a scan, a single large file); this returns in well under that.
+    Bytes are read here — the UploadFile stream closes when the request returns —
+    the job row is committed `pending`, and extraction runs in a threadpool
+    BackgroundTask that writes the same ExtractResponse /extract returns. The
+    client polls GET /jobs/{id}.
+    """
+    if not files:
+        raise HTTPException(status_code=400, detail="At least one PDF must be uploaded.")
+
+    files_bytes: list[tuple[str, bytes]] = []
+    for upload in files:
+        pdf_bytes = await upload.read()
+        _validate_pdf(upload.filename, pdf_bytes)
+        files_bytes.append((upload.filename or "<unnamed>", pdf_bytes))
+
+    job = ExtractionJob(caller_id=caller, status="pending")
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    background_tasks.add_task(_run_extraction_job, job.id, files_bytes, caller)
+    return ExtractAsyncAccepted(job_id=job.id)
+
+
+def _run_extraction_job(
+    job_id: uuid.UUID, files_bytes: list[tuple[str, bytes]], caller: int | None
+) -> None:
+    """Background worker for /extract-async (#5977). A sync def, so Starlette runs
+    it in a threadpool and slow OCR never blocks the event loop. It opens its own
+    session (the request's is already closed), writes the same ExtractResponse
+    the sync path returns, and never raises out — a failure lands as
+    status=failed + error so the client's poll sees a terminal state.
+    """
+    db = SessionLocal()
+    try:
+        job = db.get(ExtractionJob, job_id)
+        if job is None:
+            return
+        job.status = "running"
+        db.commit()
+
+        results = [_extract_one(db, fn, pdf_bytes) for fn, pdf_bytes in files_bytes]
+        response = ExtractResponse(
+            documents=results,
+            operator_defaults=_load_operator_defaults(caller, db),
+        )
+        job.result = response.model_dump(mode="json")
+        job.status = "done"
+        job.error = None
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        try:
+            job = db.get(ExtractionJob, job_id)
+            if job is not None:
+                job.status = "failed"
+                job.error = str(exc)[:2000]
+                db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("failed to mark extraction job %s failed", job_id)
+        logger.exception("extraction job %s failed: %s", job_id, exc)
+    finally:
+        db.close()
+
+
+@router.get("/jobs/{job_id}", response_model=JobStatusOut)
+def get_extraction_job(job_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Poll an async extraction job (#5977): its status, and once done, the same
+    result shape /extract returns. 404 when the id is unknown."""
+    job = db.get(ExtractionJob, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Extraction job not found.")
+    return JobStatusOut(status=job.status, result=job.result, error=job.error)
 
 
 @router.post("/decide", response_model=DecideResponse)

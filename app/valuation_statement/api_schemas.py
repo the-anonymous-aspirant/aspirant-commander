@@ -189,3 +189,18 @@ class DecideResponse(BaseModel):
     documents: list[DecideResult]
     any_ocr_required: bool
     estimated_seconds: int
+
+
+class ExtractAsyncAccepted(BaseModel):
+    """The 202 body of /extract-async: the id the client polls (system_3 #5977)."""
+    job_id: UUID
+
+
+class JobStatusOut(BaseModel):
+    """GET /jobs/{id}: the async extraction outcome (system_3 #5977).
+
+    `result` carries the same shape /extract returns once `status` is `done`;
+    `error` is set when `status` is `failed`."""
+    status: str  # pending | running | done | failed
+    result: ExtractResponse | None = None
+    error: str | None = None
