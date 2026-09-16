@@ -91,14 +91,15 @@ def test_extraction_failure_lands_as_terminal_job(client, monkeypatch):
     assert "extractor exploded" in (job.error or "")
 
 
-def test_jobs_get_returns_completed_result(client, db_session):
-    r = client.post("/valuation-statement/extract-async", files=_files())
+def test_jobs_get_returns_completed_result(make_client, db_session):
+    owner = make_client(7)
+    r = owner.post("/valuation-statement/extract-async", files=_files())
     job_id = r.json()["job_id"]
     # The request session cached the pending row; expire so the GET (same session,
     # via the dependency override) re-reads the background task's committed update.
     db_session.expire_all()
 
-    g = client.get(f"/valuation-statement/jobs/{job_id}")
+    g = owner.get(f"/valuation-statement/jobs/{job_id}")
     assert g.status_code == 200
     body = g.json()
     assert body["status"] == "done"
@@ -106,7 +107,39 @@ def test_jobs_get_returns_completed_result(client, db_session):
     assert body["error"] is None
 
 
+def test_jobs_get_scoped_to_owner_other_caller_404(make_client, db_session):
+    """#5986 IDOR: a job carries the submitter's valuation PII, so a DIFFERENT
+    authenticated caller must not read it by id — and gets a 404 identical to an
+    unknown id, so it cannot confirm the job exists or leak any result. The row
+    IS visible to the other client's session (shared db_session), so the 404 is
+    owner-scoping, not a missing row."""
+    owner = make_client(7)
+    other = make_client(8)
+    r = owner.post("/valuation-statement/extract-async", files=_files())
+    job_id = r.json()["job_id"]
+    db_session.expire_all()
+
+    g = other.get(f"/valuation-statement/jobs/{job_id}")
+    assert g.status_code == 404
+    assert "result" not in g.text and "documents" not in g.text
+
+
+def test_jobs_get_requires_caller_identity(make_client, db_session):
+    """The read is fail-closed on identity (#5986): no X-Aspirant-User-Id → 401,
+    never the pre-#3096 open behaviour of serving per-user data without a caller."""
+    owner = make_client(7)
+    anon = make_client(None)
+    r = owner.post("/valuation-statement/extract-async", files=_files())
+    job_id = r.json()["job_id"]
+    db_session.expire_all()
+
+    g = anon.get(f"/valuation-statement/jobs/{job_id}")
+    assert g.status_code == 401
+
+
 def test_jobs_get_unknown_id_is_404(client):
+    # `client` sends the default caller header, so this reaches the lookup and
+    # 404s on the unknown id (not 401 on missing identity).
     g = client.get(f"/valuation-statement/jobs/{uuid.uuid4()}")
     assert g.status_code == 404
 
