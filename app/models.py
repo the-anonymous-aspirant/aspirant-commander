@@ -252,3 +252,41 @@ class ExtractionDiagnostic(Base):
         # The retention sweep and the re-upload correlation both filter here.
         Index("ix_extraction_diagnostics_content_sha256", "content_sha256"),
     )
+
+
+class ExtractionJob(Base):
+    """An async ``/extract-async`` run (system_3 #5977).
+
+    Beats the ~100s Cloudflare edge (#5969): the POST returns a job id at once
+    and extraction runs in a FastAPI BackgroundTask that writes its outcome
+    here, so ``GET /jobs/{id}`` serves the result from the DB — worker-agnostic,
+    no in-memory coupling. ``result`` holds the same ``ExtractResponse`` shape
+    ``/extract`` returns. A worker restart mid-run orphans a ``running`` row
+    (the client's poll stalls and it retries); a durable reaper is a follow-up
+    only if that ever bites. Created by ``Base.metadata.create_all`` at startup
+    like every other table here — no db_migrate step for a brand-new table.
+    """
+
+    __tablename__ = "extraction_jobs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    # pending -> running -> done | failed
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    # The serialized ExtractResponse (documents + operator_defaults), or None
+    # until the background task completes.
+    result: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    caller_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
