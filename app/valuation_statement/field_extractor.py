@@ -1278,6 +1278,7 @@ def extract_fields(pdf_bytes: bytes, filename: str) -> ExtractionResult:
         _mark_ocr_confidence(result.fields)
     if _needs_comparable_sales(ctx) and ctx.page_count > 1:
         result.extras["comparable_sales"] = _extract_comparable_sales_p2(pdf_bytes)
+    result.extras["samintecknad_evidence"] = detect_samintecknad(ctx)
     result.diagnostics = _build_diagnostics(ctx, pdf_bytes, result)
     return result
 
@@ -1448,3 +1449,158 @@ def _parse_comparable_row(line: str) -> dict | None:
         "salj_datum": salj_datum,
         "raw": stripped,
     }
+
+
+# ---------- samintecknad (Fastighetsrapport, #6006) ----------
+#
+# A property is *samintecknad* when a mortgage (inteckning) also encumbers another
+# property. The operator reads it off two phrases (system_3 #6006):
+#
+#   * `Belastar även <beteckning>` in the Inteckningar table's Anmärkning column —
+#     the samintecknad signal proper.
+#   * `Köp, avser även annan fastighet` in the Fång column of an ownership row — the
+#     purchase covered another property too. It fires only for the CURRENT owners:
+#     the same phrase on a `Tidigare ägare` row is history and says nothing about
+#     today's mortgages, and the example document carries it there as well.
+#
+# Two properties of the real text layer shape the matcher. pdfplumber renders the
+# report SPACELESS (`Belastaräven`, `Köp,avserävenannanfastighet`), so every
+# comparison is on the whitespace-stripped, lowercased line — a literal phrase
+# match reads zero hits on the operator's own example. And the phrase alone is not
+# enough: which section a line sits in decides whether it fires, so the walk
+# tracks the section from its header lines.
+
+_SAMINTECKNAD_MORTGAGE = "belastaräven"
+_SAMINTECKNAD_PURCHASE = "avserävenannanfastighet"
+
+_SECTION_OWNERS = "agare"
+_SECTION_PREVIOUS_OWNERS = "tidigare_agare"
+_SECTION_MORTGAGES = "inteckningar"
+
+# Section headers after whitespace removal and lowercasing (a trailing `*`
+# footnote marker dropped). Any header not opening one of the three sections
+# above closes whichever was open, so a phrase further down the report (an
+# Avtalsrättigheter Anmärkning, say) is never read as a mortgage row.
+_OPENING_HEADERS = {
+    "ägare": _SECTION_OWNERS,
+    "tidigareägare": _SECTION_PREVIOUS_OWNERS,
+    "inteckningar": _SECTION_MORTGAGES,
+}
+_CLOSING_HEADERS = frozenset(
+    {
+        "fastighet",
+        "fastighetsattribut",
+        "registerenhetsanmärkning",
+        "adresser",
+        "tomträttsupplåtelse",
+        "avtalsrättigheter",
+        "rättigheter",
+        "taxeringsuppgifter",
+        "planerochbestämmelser",
+        "samfälligheter",
+        "åtgärder",
+        "byggnader",
+        "koordinater",
+    }
+)
+
+_DATE_RE = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
+# A fastighetsbeteckning ends in `<block>:<unit>` and carries a word of letters
+# before it (`Ulricehamn HOLMARED 1:11`, spaceless `UlricehamnHOLMARED1:11`). The
+# letter run is what tells it from an akt number that also ends in `n:n`
+# (`D-2022-00216991:6`).
+_BETECKNING_RE = re.compile(
+    r"[A-Za-zÅÄÖåäöÉé][A-Za-zÅÄÖåäöÉé\- ]*[A-Za-zÅÄÖåäöÉé]{3,}[A-Za-zÅÄÖåäöÉé\- ]*\s*\d+:\d+"
+)
+
+
+def _squash(line: str) -> str:
+    return re.sub(r"\s+", "", line).lower()
+
+
+def _section_for_header(squashed: str, current: str | None) -> tuple[bool, str | None]:
+    """Is this line a section header, and which section is open after it?
+
+    `Ägare` is also a COLUMN header inside both ownership tables (`Typ / Ägare /
+    Andel …` — its own line under PyMuPDF), so it only opens the current-owners
+    section from outside an ownership section; inside `Tidigare ägare` it must not
+    reopen the current owners, or the historical purchase rows would fire.
+    """
+    key = squashed.rstrip("*")
+    if key in _OPENING_HEADERS:
+        section = _OPENING_HEADERS[key]
+        if section == _SECTION_OWNERS and current in (
+            _SECTION_OWNERS,
+            _SECTION_PREVIOUS_OWNERS,
+        ):
+            return True, current
+        return True, section
+    if key in _CLOSING_HEADERS:
+        return True, None
+    return False, current
+
+
+def _other_property(ctx: ParseContext, lines: list[str], idx: int) -> str | None:
+    """The beteckning a `Belastar även` row names: after the phrase on the same
+    line (OCR linearises a table row onto one line), else the next non-empty line
+    (the Anmärkning cell wraps under pdfplumber and PyMuPDF). Re-spaced via the
+    PyMuPDF projection when pdfplumber ran the words together."""
+    line = lines[idx]
+    after = re.split(r"belastar\s*även", line, maxsplit=1, flags=re.IGNORECASE)
+    candidates = [after[1]] if len(after) == 2 else []
+    for nxt in lines[idx + 1 :]:
+        if nxt.strip():
+            candidates.append(nxt)
+            break
+    for candidate in candidates:
+        match = _BETECKNING_RE.search(candidate)
+        if match:
+            return _canonical_via_fitz(ctx, match.group(0).strip())
+    return None
+
+
+def _leading_row_number(line: str) -> str | None:
+    match = re.match(r"\s*(\d+)\s", line)
+    return match.group(1) if match else None
+
+
+def detect_samintecknad(ctx: ParseContext) -> list[dict]:
+    """Evidence that a Fastighetsrapport shows the property is samintecknad.
+
+    One entry per firing row: `{section, row, other_property}`. `section` is
+    `inteckningar` (row = the mortgage Nr) or `agare` (row = the purchase's Fång
+    date). An empty list means not samintecknad — including every document that
+    is not a Fastighetsrapport. The evidence deliberately carries no owner name
+    or personnummer: the ownership row is identified by its date only.
+    """
+    if not _is_fastighetsrapport(ctx):
+        return []
+    text = ctx.full_text if ctx.full_text.strip() else ctx.fitz_full_text
+    lines = text.splitlines()
+    evidence: list[dict] = []
+    section: str | None = None
+    for idx, line in enumerate(lines):
+        squashed = _squash(line)
+        if not squashed:
+            continue
+        is_header, section = _section_for_header(squashed, section)
+        if is_header:
+            continue
+        if section == _SECTION_MORTGAGES and _SAMINTECKNAD_MORTGAGE in squashed:
+            evidence.append(
+                {
+                    "section": _SECTION_MORTGAGES,
+                    "row": _leading_row_number(line),
+                    "other_property": _other_property(ctx, lines, idx),
+                }
+            )
+        elif section == _SECTION_OWNERS and _SAMINTECKNAD_PURCHASE in squashed:
+            date = _DATE_RE.search(line)
+            evidence.append(
+                {
+                    "section": _SECTION_OWNERS,
+                    "row": date.group(1) if date else None,
+                    "other_property": None,
+                }
+            )
+    return evidence

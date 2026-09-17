@@ -34,6 +34,7 @@ from app.valuation_statement.api_schemas import (
     GenerateRequest,
     JobStatusOut,
     OperatorDefaults,
+    SamintecknadEvidence,
 )
 from app.valuation_statement.extraction import (
     OUTCOME_EXTRACTED,
@@ -209,11 +210,16 @@ def _extract_one(db: Session, filename: str | None, pdf_bytes: bytes) -> Extract
     diagnostics = parsed.diagnostics
     _log_extraction_outcome(parsed.filename, diagnostics)
     _persist_extraction_outcome(db, parsed.filename, diagnostics)
+    samintecknad_evidence = parsed.extras.get("samintecknad_evidence", [])
     return ExtractionResultOut(
         filename=parsed.filename,
         fields=[ExtractedFieldOut(**asdict(field)) for field in parsed.fields],
         comparable_sales=[
             ComparableSale(**row) for row in parsed.extras.get("comparable_sales", [])
+        ],
+        samintecknad=bool(samintecknad_evidence),
+        samintecknad_evidence=[
+            SamintecknadEvidence(**row) for row in samintecknad_evidence
         ],
         outcome=diagnostics.outcome if diagnostics else OUTCOME_EXTRACTED,
         diagnostics=(

@@ -31,6 +31,19 @@ class ComparableSale(BaseModel):
     raw: str | None = None
 
 
+class SamintecknadEvidence(BaseModel):
+    """One row showing the property is samintecknad (system_3 #6006).
+
+    `section` is `inteckningar` (a mortgage row whose Anmärkning reads `Belastar
+    även`; `row` is its Nr, `other_property` the beteckning it also encumbers) or
+    `agare` (a current owner's purchase `avser även annan fastighet`; `row` is the
+    Fång date). Carries no owner name or personnummer.
+    """
+    section: str
+    row: str | None = None
+    other_property: str | None = None
+
+
 class ExtractionDiagnosticsOut(BaseModel):
     """Why a document produced what it produced — no document content.
 
@@ -76,6 +89,11 @@ class ExtractionResultOut(BaseModel):
     filename: str
     fields: list[ExtractedFieldOut]
     comparable_sales: list[ComparableSale] = Field(default_factory=list)
+    # The operator's "OBS! samintecknad" warning (system_3 #6006): true iff
+    # `samintecknad_evidence` is non-empty. Stated rather than left to the client
+    # to derive, the same reason `outcome` is.
+    samintecknad: bool = False
+    samintecknad_evidence: list[SamintecknadEvidence] = Field(default_factory=list)
     outcome: str = "extracted"
     diagnostics: ExtractionDiagnosticsOut | None = None
 
