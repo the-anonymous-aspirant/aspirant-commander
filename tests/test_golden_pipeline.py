@@ -112,6 +112,17 @@ def test_extract_matches_golden(golden_path: Path):
         f"got {actual_comparables}, golden expected {expected_comparables}"
     )
 
+    # Samintecknad (system_3 #6006): none of the sample documents is samintecknad,
+    # so every golden is a negative control for the warning unless its fixture
+    # says otherwise.
+    expected_samintecknad = golden.get("samintecknad", False)
+    actual_samintecknad = bool(result.extras.get("samintecknad_evidence"))
+    assert actual_samintecknad == expected_samintecknad, (
+        f"{pdf_name}: samintecknad drift — got {actual_samintecknad} "
+        f"({result.extras.get('samintecknad_evidence')}), golden expected "
+        f"{expected_samintecknad}"
+    )
+
 
 def test_golden_set_is_nonempty():
     """Guard against the directory accidentally going empty (e.g. a
