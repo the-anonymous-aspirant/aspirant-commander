@@ -15,6 +15,7 @@ beteckningar; the real document carries personnummer and is not a fixture.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import fitz
 import pytest
@@ -25,77 +26,23 @@ from app.valuation_statement.field_extractor import detect_samintecknad
 
 BANNER = ["Fastighetsrapport", "Plus R", "Fastighet"]
 
-# The example report's layout, rendered the way PyMuPDF reads it: spaced, one
-# cell per line, the ownership tables' `Ägare` COLUMN header on its own line.
-SPACED = [
-    *BANNER,
-    "Beteckning",
-    "Testby EKLUNDA 1:76",
-    "Ägare",
-    "Typ",
-    "Ägare",
-    "Andel Inskrivning",
-    "Lagfart",
-    "Anna Exempel, Testvägen 3",
-    "Fång",
-    "2022-04-28 2150000 1/2 Köp, avser även annan fastighet Beviljad 2022-05-23",
-    "Tidigare ägare",
-    "Typ",
-    "Ägare",
-    "Inskrivning",
-    "Lagfart",
-    "Bertil Tidigare, Gamla vägen 1",
-    "Fång",
-    "1991-05-31 725000 1/2 Köp, avser även annan fastighet Beviljad 1991-06-10",
-    "Tomträttsupplåtelse",
-    "-",
-    "Inteckningar",
-    "Nr Likarätt Belopp Inomläge Typ Anmärkning Inskrivning Akt",
-    "2 510 000 510 000 Digitalt Belastar även 2022-05-23 D-2022-00216991:6",
-    "Testby EKLUNDA 1:11",
-    "UC Bostad Sida 1 av 2",
-    "Fastighetsrapport",
-    "Plus R",
-    "Inteckningar",
-    "3 1 317 000 1 827 000 Digitalt Belastar även 2022-05-23 D-2022-00216991:7",
-    "Testby EKLUNDA 1:11",
-    "Avtalsrättigheter*",
-    "1 Avtalsservitut Ledning mm. 1963-11-06 63/2584",
-]
+FIXTURES = Path(__file__).parent / "fixtures" / "samintecknad"
+
+
+def _fixture(name: str) -> list[str]:
+    return (FIXTURES / name).read_text(encoding="utf-8").splitlines()
+
+
+# The example report's layout (names and beteckningar invented), rendered the way
+# PyMuPDF reads it: spaced, one cell per line, the ownership tables' `Ägare`
+# COLUMN header on its own line.
+SPACED = _fixture("fastighetsrapport_pymupdf.txt")
 
 
 # The same report as pdfplumber reads it (the example's real shape): words inside
 # a cell run together, cells on a row stay space-separated, the `Ägare` column
 # header is merged into its row, and the beteckning wraps onto its own line.
-SPACELESS = [
-    *BANNER,
-    "Beteckning",
-    "TestbyEKLUNDA1:76",
-    "Ägare",
-    "Typ Ägare Andel Inskrivning Akt",
-    "Lagfart AnnaExempel,Testvägen3, 1/1 2022-05-23 D-2022-00216991:3",
-    "Fång Belopp Andel Art Beslut Inskrivning Akt",
-    "2022-04-28 2150000 1/2 Köp,avserävenannanfastighet Beviljad 2022-05-23 D-2022-00216991:3",
-    "Tidigareägare",
-    "Typ Ägare Inskrivning Akt",
-    "Lagfart BertilTidigare,Gamlavägen1 1991-06-10 91/10269",
-    "Fång Belopp Andel Art Beslut Inskrivning Akt",
-    "1991-05-31 725000 1/2 Köp,avserävenannanfastighet Beviljad 1991-06-10 91/10269",
-    "Tomträttsupplåtelse",
-    "-",
-    "Inteckningar",
-    "Nr Likarätt Belopp Inomläge Typ Anmärkning Inskrivning Akt",
-    "2 510000 510000 Digitalt Belastaräven 2022-05-23 D-2022-00216991:6",
-    "TestbyEKLUNDA1:11",
-    "UCBostad Sida1av2",
-    "Fastighetsrapport",
-    "Plus R",
-    "Inteckningar",
-    "3 1317000 1827000 Digitalt Belastaräven 2022-05-23 D-2022-00216991:7",
-    "TestbyEKLUNDA1:11",
-    "Avtalsrättigheter*",
-    "1 Avtalsservitut Ledningmm. 1963-11-06 63/2584",
-]
+SPACELESS = _fixture("fastighetsrapport_pdfplumber.txt")
 
 
 def _ctx(lines: list[str], *, fitz_lines: list[str] | None = None) -> ParseContext:

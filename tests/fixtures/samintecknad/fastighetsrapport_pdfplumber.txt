@@ -1,0 +1,29 @@
+Fastighetsrapport
+Plus R
+Fastighet
+Beteckning
+TestbyEKLUNDA1:76
+Ägare
+Typ Ägare Andel Inskrivning Akt
+Lagfart AnnaExempel,Testvägen3, 1/1 2022-05-23 D-2022-00216991:3
+Fång Belopp Andel Art Beslut Inskrivning Akt
+2022-04-28 2150000 1/2 Köp,avserävenannanfastighet Beviljad 2022-05-23 D-2022-00216991:3
+Tidigareägare
+Typ Ägare Inskrivning Akt
+Lagfart BertilTidigare,Gamlavägen1 1991-06-10 91/10269
+Fång Belopp Andel Art Beslut Inskrivning Akt
+1991-05-31 725000 1/2 Köp,avserävenannanfastighet Beviljad 1991-06-10 91/10269
+Tomträttsupplåtelse
+-
+Inteckningar
+Nr Likarätt Belopp Inomläge Typ Anmärkning Inskrivning Akt
+2 510000 510000 Digitalt Belastaräven 2022-05-23 D-2022-00216991:6
+TestbyEKLUNDA1:11
+UCBostad Sida1av2
+Fastighetsrapport
+Plus R
+Inteckningar
+3 1317000 1827000 Digitalt Belastaräven 2022-05-23 D-2022-00216991:7
+TestbyEKLUNDA1:11
+Avtalsrättigheter*
+1 Avtalsservitut Ledningmm. 1963-11-06 63/2584

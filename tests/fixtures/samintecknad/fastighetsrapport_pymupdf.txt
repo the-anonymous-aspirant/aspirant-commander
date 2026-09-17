@@ -1,0 +1,35 @@
+Fastighetsrapport
+Plus R
+Fastighet
+Beteckning
+Testby EKLUNDA 1:76
+Ägare
+Typ
+Ägare
+Andel Inskrivning
+Lagfart
+Anna Exempel, Testvägen 3
+Fång
+2022-04-28 2150000 1/2 Köp, avser även annan fastighet Beviljad 2022-05-23
+Tidigare ägare
+Typ
+Ägare
+Inskrivning
+Lagfart
+Bertil Tidigare, Gamla vägen 1
+Fång
+1991-05-31 725000 1/2 Köp, avser även annan fastighet Beviljad 1991-06-10
+Tomträttsupplåtelse
+-
+Inteckningar
+Nr Likarätt Belopp Inomläge Typ Anmärkning Inskrivning Akt
+2 510 000 510 000 Digitalt Belastar även 2022-05-23 D-2022-00216991:6
+Testby EKLUNDA 1:11
+UC Bostad Sida 1 av 2
+Fastighetsrapport
+Plus R
+Inteckningar
+3 1 317 000 1 827 000 Digitalt Belastar även 2022-05-23 D-2022-00216991:7
+Testby EKLUNDA 1:11
+Avtalsrättigheter*
+1 Avtalsservitut Ledning mm. 1963-11-06 63/2584
