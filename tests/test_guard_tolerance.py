@@ -132,6 +132,33 @@ def test_prose_guard_stays_case_sensitive():
     assert _is_datavardering_prose(_ctx(prose))
     assert not _is_datavardering_prose(_ctx(prose.lower()))
     assert not _is_datavardering_prose(_ctx(BANNERS["datavardering_uc_br"]))
+    # The discrimination is CASE, so a mixed-case banner must still be refused
+    # even with the diacritics intact — this is the pair #6240 must not break.
+    assert not _is_datavardering_prose(_ctx("Värdeutlåtande\nVärderingsobjekt: Hök 1:1"))
+    assert not _is_datavardering_prose(_ctx(BANNERS["datavardering_uc_smahus"]))
+
+
+def test_prose_guard_tolerates_lost_diacritics(): 
+    """#6240: case is load-bearing, diacritics are not.
+
+    The four sibling guards carry `[äa]`-style classes so a rendering that
+    loses `Ä`/`Å` — a scan, a re-print, an OCR pass — still fingerprints. This
+    guard was left out of the #5371 restoration for a reason about *case*,
+    which says nothing about diacritics; these cases pin the difference.
+
+    Note the negative half: stripping diacritics must not turn the guard
+    case-insensitive by the back door, or it starts claiming UC Bostad.
+    """
+    assert _is_datavardering_prose(_ctx("VARDEUTLATANDE\nVarderingsobjekt: Hok 1:1"))
+    assert _is_datavardering_prose(_ctx("VÄRDEUTLATANDE\nVärderingsobjekt: Hök 1:1"))
+    assert _is_datavardering_prose(_ctx("VARDEUTLÅTANDE\nVarderingsobjekt: Hök 1:1"))
+
+    # ...and the discrimination survives the widening.
+    assert not _is_datavardering_prose(_ctx("vardeutlatande\nvarderingsobjekt: hok 1:1"))
+    assert not _is_datavardering_prose(_ctx("Vardeutlatande Bostadsratt"))
+    assert not _is_datavardering_prose(_ctx("Vardeutlatande Smahus"))
+    # Banner present, second anchor absent: still not a prose appraisal.
+    assert not _is_datavardering_prose(_ctx("VARDEUTLATANDE\nnagot helt annat"))
 
 
 # ---------- the same two claims, against the real documents ----------
