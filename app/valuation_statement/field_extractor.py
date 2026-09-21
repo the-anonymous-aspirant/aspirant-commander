@@ -96,8 +96,27 @@ class Slot:
 
 
 def _is_datavardering_prose(ctx: ParseContext) -> bool:
-    """Fastighetsbyrån prose appraisal: VÄRDEUTLÅTANDE banner + Värderingsobjekt."""
-    return "VÄRDEUTLÅTANDE" in ctx.page1_text and "Värderingsobjekt" in ctx.page1_text
+    r"""Fastighetsbyrån prose appraisal: VÄRDEUTLÅTANDE banner + Värderingsobjekt.
+
+    **Case stays load-bearing; diacritics do not (#6240).** The ALL-CAPS banner
+    is what distinguishes this layout from the UC Bostad reports, whose own
+    banners carry the same word in mixed case (`Värdeutlåtande Bostadsrätt`) —
+    so `re.IGNORECASE` here would let this guard claim them, which is why
+    #5371 deliberately left this one guard out of the tolerant set
+    (`test_prose_guard_stays_case_sensitive`).
+
+    That reason is about **case**. It says nothing about `Ä`/`Å`, and an exact
+    substring additionally required the diacritics to survive whatever produced
+    the text — a scan, a re-print, an OCR pass. The four sibling guards already
+    carry `[äa]`-style classes for exactly this; matching them finishes the
+    #5371/#5909 job rather than widening past it. The character classes stay
+    upper-case-only and there is no ``re.IGNORECASE``, so every discrimination
+    the original pattern made is preserved.
+    """
+    return bool(
+        re.search(r"V[ÄA]RDEUTL[ÅA]TANDE", ctx.page1_text)
+        and re.search(r"V[äa]rderingsobjekt", ctx.page1_text)
+    )
 
 
 # On the OCR path a misread logo or stray glyphs can fall BETWEEN two adjacent
