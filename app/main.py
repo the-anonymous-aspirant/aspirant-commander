@@ -4,8 +4,14 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.config import COMMANDER_VERSION, SERVICE_NAME, TRANSCRIBER_POLL_INTERVAL
+from app.config import (
+    COMMANDER_VERSION,
+    DB_NAME,
+    SERVICE_NAME,
+    TRANSCRIBER_POLL_INTERVAL,
+)
 from app.database import Base, SessionLocal, engine
+from app.db_guard import WrongDatabaseError, ensure_database_identity
 from app.db_migrate import (
     ensure_missed_expected_slots_column,
     ensure_no_text_subkind_column,
@@ -54,6 +60,10 @@ async def lifespan(app: FastAPI):
 
     try:
         logger.info("Creating database tables...")
+        # Refuse to touch a database that isn't this service's own before any
+        # schema-creating statement runs (system_3 #7722) — e.g. system_3's
+        # DATABASE_URL leaking into this process's environment.
+        ensure_database_identity(engine, DB_NAME)
         Base.metadata.create_all(bind=engine)
         # create_all never ALTERs an existing table, so a new column on a table
         # that already holds rows needs an explicit idempotent migration (#3125).
@@ -74,6 +84,11 @@ async def lifespan(app: FastAPI):
 
         _polling_task = asyncio.create_task(_background_polling_loop())
         routes.polling_active = True
+    except WrongDatabaseError:
+        # Not a test-mode connection hiccup — a real database answered and it
+        # is the wrong one. Let this crash startup rather than log a warning
+        # and come up half-functional against someone else's database.
+        raise
     except Exception as exc:
         logger.warning("Lifespan startup skipped (likely test mode): %s", exc)
 

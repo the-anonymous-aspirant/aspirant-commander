@@ -1,13 +1,18 @@
 import os
 
 
+# This service's own database name, independent of how DATABASE_URL below is
+# constructed — app/db_guard.py checks the connection against this name at
+# startup even when DATABASE_URL is supplied whole-cloth (system_3 #7722).
+DB_NAME = os.environ.get("DB_NAME", "aspirant_online_db")
+
 DATABASE_URL = os.environ.get(
     "DATABASE_URL",
     "postgresql://{user}:{password}@{host}/{name}".format(
         user=os.environ.get("DB_USER", "postgres"),
         password=os.environ.get("DB_PASSWORD", "postgres"),
         host=os.environ.get("DB_HOST", "postgres"),
-        name=os.environ.get("DB_NAME", "aspirant_online_db"),
+        name=DB_NAME,
     ),
 )
 
