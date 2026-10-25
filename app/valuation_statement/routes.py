@@ -5,6 +5,7 @@ import uuid
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 
+from starlette.concurrency import run_in_threadpool
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -378,7 +379,9 @@ async def decide_uploads(files: list[UploadFile] = File(...)):
                 status_code=415,
                 detail=f"{upload.filename}: file is not a PDF.",
             )
-        decision = decide_extraction(pdf_bytes)
+        # Off the event loop: a decide of a dense vector document is CPU work
+        # (#8748), and the same process answers the extraction job polls.
+        decision = await run_in_threadpool(decide_extraction, pdf_bytes)
         results.append(
             DecideResult(
                 filename=upload.filename or "<unnamed>",

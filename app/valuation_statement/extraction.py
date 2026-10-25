@@ -150,7 +150,9 @@ def decide_extraction(pdf_bytes: bytes) -> ExtractionDecision:
     """Decide whether OCR is required and estimate its duration, WITHOUT OCR.
 
     Detects a text layer, classifies the image-only sub-kind, and counts pages —
-    everything the extractor knows within ~2s. `/extract` is a single blocking
+    everything the extractor knows within ~0.3s on the cell (#8748 re-measure;
+    the ~2s figure was the pre-#8748 cost, dominated by counting every vector
+    path on a re-printed document). `/extract` is a single blocking
     POST that returns only when the ~24s OCR is done; this is the same decision,
     made cheaply, so the client can announce the image-scanning phase and
     estimate it instead of spinning silently (#5915). Estimate 0 / sub-kind None
@@ -174,9 +176,12 @@ def decide_extraction(pdf_bytes: bytes) -> ExtractionDecision:
 
     with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
         page_count = doc.page_count
-        fitz_native = "\n".join((page.get_text() or "") for page in doc)
+        # "Any text at all?" is the whole question, so the read stops at the
+        # first page that has some (#8748); a no-text document still reads
+        # every page, which is the ~0.2 s the figure above includes.
+        has_text = any((page.get_text() or "").strip() for page in doc)
 
-    ocr_required = not fitz_native.strip()
+    ocr_required = not has_text
     subkind = classify_no_text_subkind(pdf_bytes) if ocr_required else None
     per_page = (
         OCR_SECONDS_PER_PAGE.get(subkind or "unknown", OCR_SECONDS_PER_PAGE["unknown"])
