@@ -215,6 +215,20 @@ _SUBKIND_MIN_DRAWINGS = 50
 _SUBKIND_FULL_PAGE_IMAGE_FRAC = 0.5
 
 
+_PATH_KINDS = ("fill-path", "stroke-path")
+
+
+def _count_paths(page) -> int:
+    """Number of vector drawing operations on a page, from the bbox log.
+
+    `page.get_bboxlog()` lists every drawing/text/image operation with its
+    bbox and kind; the path kinds count one per `get_drawings()` entry (checked
+    on the smoke corpus: 1984 == 1984) at a fraction of the cost, because no
+    path geometry is materialised.
+    """
+    return sum(1 for kind, _rect in page.get_bboxlog() if kind in _PATH_KINDS)
+
+
 def classify_no_text_subkind(pdf_bytes: bytes) -> str:
     """Tell a re-printed vector PDF apart from a true raster scan.
 
@@ -238,7 +252,16 @@ def classify_no_text_subkind(pdf_bytes: bytes) -> str:
     with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
         for page in doc:
             total_fonts += len(page.get_fonts())
-            total_drawings += len(page.get_drawings())
+            # The decision only asks "at least _SUBKIND_MIN_DRAWINGS paths?", so
+            # the count stops at the threshold and comes from the page's bbox
+            # log, not `get_drawings()`: on the smoke's re-printed vector doc
+            # (1984/1588/895 paths) get_drawings cost 1.13 s of /decide's 1.43 s
+            # while the bbox log reads the same counts in 0.08 s per page, and
+            # page 1 alone settles the threshold (#8748). Fonts and the
+            # full-page-image check stay per page over every page: both are
+            # sub-millisecond and both feed the decision across all pages.
+            if total_drawings < _SUBKIND_MIN_DRAWINGS:
+                total_drawings += _count_paths(page)
             page_area = abs(page.rect.width * page.rect.height) or 1.0
             for img in page.get_images(full=True):
                 for rect in page.get_image_rects(img[0]):

@@ -207,6 +207,37 @@ def test_decide_served_path_stays_far_faster_than_the_pdfplumber_read(client):
     )
 
 
+def test_classify_stays_far_cheaper_than_a_get_drawings_walk():
+    """The second served-path budget (#8748): on a dense vector document the
+    sub-kind classification must cost at most a third of walking every page's
+    drawings with `get_drawings()`, the implementation it replaced (1.13 s of a
+    1.43 s /decide on the smoke corpus; the bbox-log count on page 1 alone is
+    ~0.08 s). A ratio against the same document in the same run, so it does not
+    flake under load. RED if the classifier goes back to materialising paths on
+    every page."""
+    import time
+
+    from app.valuation_statement._ocr import classify_no_text_subkind
+
+    pdf = _dense_vector_pdf(pages=3, lines_per_page=3000)
+
+    t = time.perf_counter()
+    assert classify_no_text_subkind(pdf) == "reprinted_vector"
+    classify_s = time.perf_counter() - t
+
+    t = time.perf_counter()
+    with fitz.open(stream=pdf, filetype="pdf") as doc:
+        walked = sum(len(page.get_drawings()) for page in doc)
+    walk_s = time.perf_counter() - t
+    assert walked >= 3 * 3000
+
+    assert classify_s < walk_s / 3, (
+        f"classify_no_text_subkind ({classify_s * 1000:.0f}ms) is not >=3x cheaper than a "
+        f"get_drawings walk of the same pages ({walk_s * 1000:.0f}ms); the early stop or the "
+        f"bbox-log count has regressed (#8748)"
+    )
+
+
 @pytest.mark.skipif(
     shutil.which("tesseract") is None, reason="tesseract binary not installed"
 )

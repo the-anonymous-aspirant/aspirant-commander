@@ -92,3 +92,44 @@ def test_a_digital_document_has_no_subkind():
     """A document that carried text never reaches the classifier — sub-kind None."""
     diag = extract_document(_digital_text_pdf(), "digital.pdf").diagnostics
     assert diag.no_text_subkind is None
+
+
+def test_classifier_stops_counting_paths_once_the_threshold_is_reached(monkeypatch):
+    """The decision asks only "at least _SUBKIND_MIN_DRAWINGS paths?", so on a
+    re-printed vector document the path count must settle on the first page and
+    the remaining pages must not be walked for paths (#8748: get_drawings on
+    every page was 1.13 s of a 1.43 s /decide on the smoke corpus). Fonts and
+    the full-page-image check still run on every page."""
+    import fitz
+
+    from app.valuation_statement import _ocr
+
+    calls = {"bboxlog": 0, "fonts": 0}
+    real_bboxlog = fitz.Page.get_bboxlog
+    real_fonts = fitz.Page.get_fonts
+
+    def counting_bboxlog(self, *a, **k):
+        calls["bboxlog"] += 1
+        return real_bboxlog(self, *a, **k)
+
+    def counting_fonts(self, *a, **k):
+        calls["fonts"] += 1
+        return real_fonts(self, *a, **k)
+
+    monkeypatch.setattr(fitz.Page, "get_bboxlog", counting_bboxlog)
+    monkeypatch.setattr(fitz.Page, "get_fonts", counting_fonts)
+    assert _ocr.classify_no_text_subkind(_reprinted_vector_pdf(pages=3, draws_per_page=300)) == SUBKIND_REPRINTED_VECTOR
+    assert calls["bboxlog"] == 1, calls
+    assert calls["fonts"] == 3, calls
+
+
+def test_path_count_matches_get_drawings_on_a_vector_page():
+    """The bbox-log count is the same number get_drawings() returned, so the
+    calibrated threshold keeps its meaning (#8748)."""
+    import fitz
+
+    from app.valuation_statement._ocr import _count_paths
+
+    with fitz.open(stream=_reprinted_vector_pdf(pages=1, draws_per_page=120), filetype="pdf") as doc:
+        page = doc[0]
+        assert _count_paths(page) == len(page.get_drawings()) == 120
