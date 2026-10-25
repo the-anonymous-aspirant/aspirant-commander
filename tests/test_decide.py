@@ -219,7 +219,12 @@ def test_classify_stays_far_cheaper_than_a_get_drawings_walk():
 
     from app.valuation_statement._ocr import classify_no_text_subkind
 
-    pdf = _dense_vector_pdf(pages=3, lines_per_page=3000)
+    # Eight pages, so the early stop (one page's bbox log) and the full walk
+    # (eight pages of materialised paths) sit well apart even on synthetic
+    # straight lines, which get_drawings materialises far more cheaply than
+    # the real document's outlined glyphs (3 pages: 128 ms synthetic vs
+    # 1.13 s real); a 3-page fixture measured only ~2.3x.
+    pdf = _dense_vector_pdf(pages=8, lines_per_page=3000)
 
     t = time.perf_counter()
     assert classify_no_text_subkind(pdf) == "reprinted_vector"
@@ -229,7 +234,7 @@ def test_classify_stays_far_cheaper_than_a_get_drawings_walk():
     with fitz.open(stream=pdf, filetype="pdf") as doc:
         walked = sum(len(page.get_drawings()) for page in doc)
     walk_s = time.perf_counter() - t
-    assert walked >= 3 * 3000
+    assert walked >= 8 * 3000
 
     assert classify_s < walk_s / 3, (
         f"classify_no_text_subkind ({classify_s * 1000:.0f}ms) is not >=3x cheaper than a "
