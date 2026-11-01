@@ -694,6 +694,20 @@ def test_generate_refuses_a_blank_maklare_namn(client):
         assert "identity" in r.json()["detail"].lower()
 
 
+def test_generate_422_logs_its_detail(client, caplog):
+    """#9439: commander's access log carries only the status (422), not why —
+    the admin-account save that triggered this task left no reason in any
+    log. The handler now logs the same detail it returns, so the next one is
+    diagnosable without reproducing it."""
+    import logging
+
+    body = {**_GENERATE_BODY, "maklare_namn": ""}
+    with caplog.at_level(logging.WARNING, logger="app.valuation_statement.routes"):
+        r = client.post("/valuation-statement/generate", json=body)
+    assert r.status_code == 422
+    assert any(r.json()["detail"] in rec.message for rec in caplog.records)
+
+
 def test_generate_default_format_is_docx(client):
     """No ?format=… → default 'docx' (existing tests rely on this)."""
     r = client.post("/valuation-statement/generate", json=_GENERATE_BODY)

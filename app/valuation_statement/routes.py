@@ -418,13 +418,15 @@ def generate_filled_docx(
     blank-signed statement.
     """
     if not (body.maklare_namn or "").strip():
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "Appraiser name (mäklarnamn) is required to sign the "
-                "värdeutlåtande. Set your appraiser identity before generating."
-            ),
+        detail = (
+            "Appraiser name (mäklarnamn) is required to sign the "
+            "värdeutlåtande. Set your appraiser identity before generating."
         )
+        # #9439: access logs carry only the 422 status, not why — the caller's
+        # own 4xx handler never sees this detail either, so without this line
+        # the only record of the reason is this request's lifetime.
+        logger.warning("generate 422 (format=%s): %s", format, detail)
+        raise HTTPException(status_code=422, detail=detail)
     fields = TemplateFields(
         objekt=body.objekt,
         objekt_short=body.objekt_short,
