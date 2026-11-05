@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Build: an older commit can no longer take `:latest` (system_3 #9983, from
+  #9966). Builds of main now run one at a time, newest last, and `:latest`
+  and `:main` go only on a build of main's current head
+  (`scripts/is-main-head.sh`, unit test `sh tests/is_main_head_unit.sh`).
+  A re-run of an older build pushes its `sha-` tag only, so auto-pull can no
+  longer roll the commander back. This is the same guard as aspirant-client
+  #409.
+
 ### Removed
 
 - `GET /valuation-statement/about` HTTP route. The aspirant-client now
